@@ -31,7 +31,8 @@ st.markdown("""
 [data-testid="stAppViewContainer"]   { background: #0f172a; }
 [data-testid="stSidebar"]            { background: #1e293b; border-right: 1px solid #334155; }
 [data-testid="stHeader"]             { background: #0f172a !important; }
-[data-testid="stMainBlockContainer"] { padding-top: 1.5rem; }
+/* Push content below the sticky header (~2.875 rem) so nothing is hidden under it */
+[data-testid="stMainBlockContainer"] { padding-top: 3.5rem !important; }
 [data-testid="stBottom"]             { background: #0f172a; }
 
 /* ── Hero ── */
@@ -39,7 +40,11 @@ st.markdown("""
     font-size: 2.4rem; font-weight: 800; letter-spacing: -0.02em;
     background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    margin-bottom: 0.15rem; line-height: 1.2;
+    background-clip: text;
+    /* Extra vertical space prevents background-clip from shearing the top/bottom
+       of tall glyphs on Chromium/Edge */
+    line-height: 1.4; padding: 0.1em 0; margin-bottom: 0.1rem;
+    display: inline-block;
 }
 .hero-sub { color: #64748b; font-size: 0.95rem; margin-bottom: 1.8rem; }
 
