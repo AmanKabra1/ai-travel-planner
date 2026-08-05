@@ -1,0 +1,41 @@
+# Systemd unit for the Multi-Agent Travel Planner (Streamlit).
+# ---------------------------------------------------------------------------
+# Install on the VPS:
+#   sudo cp deploy/travel-planner.service /etc/systemd/system/travel-planner.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now travel-planner
+#   sudo systemctl status travel-planner        # check it is running
+#   sudo journalctl -u travel-planner -f         # live logs
+#
+# Adjust the paths below if you clone the project somewhere other than
+# /opt/Multi_agent_system_part_3.
+# ---------------------------------------------------------------------------
+
+[Unit]
+Description=Multi-Agent Travel Planner (Streamlit)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+
+WorkingDirectory=/opt/Multi_agent_system_part_3
+
+# Load API keys / DATABASE_URL from the project .env
+EnvironmentFile=/opt/Multi_agent_system_part_3/.env
+
+# If the aviationstack-mcp repo lives OUTSIDE the project folder, point to its
+# venv python here; otherwise the app finds ./aviationstack-mcp/.venv/bin/python
+Environment=AVIATION_MCP_PYTHON=/opt/Multi_agent_system_part_3/aviationstack-mcp/.venv/bin/python
+
+ExecStart=/opt/Multi_agent_system_part_3/venv/bin/streamlit run frontend.py \
+    --server.address 127.0.0.1 \
+    --server.port 8501 \
+    --server.headless true
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
