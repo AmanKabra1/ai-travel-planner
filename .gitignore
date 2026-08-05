@@ -50,3 +50,8 @@ Multi_agent_system_demo/travel_plans/
 # ── Logs ──────────────────────────────────────────────────────────────────────
 *.log
 logs/
+
+# ── Root-level stray files ────────────────────────────────────────────────────
+# Duplicate requirements freeze at the repo root (UTF-16, superseded by
+# Multi_agent_system_MCP/requirements.txt).
+/requirements.txt
