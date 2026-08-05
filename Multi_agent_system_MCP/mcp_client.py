@@ -6,7 +6,6 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from config import (
     AVIATION_STACK_API_KEY,
-    OPENWEATHER_API_KEY,
     TAVILY_API_KEY,
 )
 
@@ -57,12 +56,8 @@ client = MultiServerMCPClient(
         "weather": {
             "transport": "stdio",
             "command": APP_PYTHON,
-            "args": [
-                WEATHER_SERVER,
-            ],
-            "env": {
-                "OPENWEATHER_API_KEY": OPENWEATHER_API_KEY,
-            },
+            "args": [WEATHER_SERVER],
+            # wttr.in needs no API key — env block intentionally empty
         },
     }
 )

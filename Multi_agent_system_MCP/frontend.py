@@ -2,7 +2,6 @@ import sys
 import uuid
 from datetime import datetime
 
-# Force UTF-8 so non-ASCII LLM output (₹, °C, etc.) never crashes Streamlit.
 try:
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
@@ -13,8 +12,12 @@ import streamlit as st
 from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
+import auth
 from graph import app
 from thread_history import list_threads, load_thread, delete_thread
+
+# ── One-time DB setup ─────────────────────────────────────────────────────────
+auth.setup()
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -31,35 +34,43 @@ st.markdown("""
 [data-testid="stAppViewContainer"]   { background: #0f172a; }
 [data-testid="stSidebar"]            { background: #1e293b; border-right: 1px solid #334155; }
 [data-testid="stHeader"]             { background: #0f172a !important; }
-/* Push content below the sticky header (~2.875 rem) so nothing is hidden under it */
 [data-testid="stMainBlockContainer"] { padding-top: 3.5rem !important; }
 [data-testid="stBottom"]             { background: #0f172a; }
 
-/* ── Hero ── */
+/* ── Typography ── */
 .hero-title {
     font-size: 2.4rem; font-weight: 800; letter-spacing: -0.02em;
     background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     background-clip: text;
-    /* Extra vertical space prevents background-clip from shearing the top/bottom
-       of tall glyphs on Chromium/Edge */
     line-height: 1.4; padding: 0.1em 0; margin-bottom: 0.1rem;
     display: inline-block;
 }
 .hero-sub { color: #64748b; font-size: 0.95rem; margin-bottom: 1.8rem; }
-
-/* ── Text ── */
 h2, h3 { color: #e2e8f0 !important; }
 p, li   { color: #cbd5e1; }
 
-/* ── Inputs ── */
-textarea, input[type="text"] {
-    background: #1e293b !important;
-    color: #e2e8f0 !important;
-    border: 1px solid #334155 !important;
-    border-radius: 8px !important;
+/* ── Auth card ── */
+.auth-card {
+    background: #1e293b; border: 1px solid #334155;
+    border-radius: 16px; padding: 2.5rem 2.8rem;
+    box-shadow: 0 25px 60px rgba(0,0,0,.6);
 }
-textarea:focus, input[type="text"]:focus {
+.auth-icon  { text-align: center; font-size: 3.2rem; margin-bottom: 0.4rem; }
+.auth-title {
+    text-align: center; font-size: 1.7rem; font-weight: 800;
+    background: linear-gradient(135deg, #6366f1, #a78bfa);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text; display: block; margin-bottom: 0.2rem;
+}
+.auth-sub   { text-align: center; color: #64748b; font-size: 0.85rem; margin-bottom: 1.5rem; }
+
+/* ── Inputs ── */
+textarea, input[type="text"], input[type="password"] {
+    background: #0f172a !important; color: #e2e8f0 !important;
+    border: 1px solid #334155 !important; border-radius: 8px !important;
+}
+textarea:focus, input[type="text"]:focus, input[type="password"]:focus {
     border-color: #6366f1 !important;
     box-shadow: 0 0 0 2px rgba(99,102,241,.2) !important;
 }
@@ -83,7 +94,9 @@ button[kind="secondary"] {
     border: 1px solid #334155 !important; border-radius: 6px !important;
     font-size: 0.8rem !important;
 }
-button[kind="secondary"]:hover { border-color: #6366f1 !important; color: #a78bfa !important; }
+button[kind="secondary"]:hover {
+    border-color: #6366f1 !important; color: #a78bfa !important;
+}
 
 /* ── Pipeline strip ── */
 .pipeline {
@@ -96,14 +109,14 @@ button[kind="secondary"]:hover { border-color: #6366f1 !important; color: #a78bf
     padding: 3px 11px; border-radius: 20px;
     font-size: 0.78rem; font-weight: 600; white-space: nowrap;
 }
-.step-done   { background: #14532d; color: #86efac; border: 1px solid #166534; }
-.step-run    { background: #312e81; color: #a5b4fc; border: 1px solid #4338ca;
-               animation: blink 1.4s ease-in-out infinite; }
-.step-wait   { background: #1e293b; color: #475569; border: 1px solid #2d3748; }
-.sep         { color: #334155; font-size: 0.7rem; user-select: none; }
+.step-done { background: #14532d; color: #86efac; border: 1px solid #166534; }
+.step-run  { background: #312e81; color: #a5b4fc; border: 1px solid #4338ca;
+             animation: blink 1.4s ease-in-out infinite; }
+.step-wait { background: #1e293b; color: #475569; border: 1px solid #2d3748; }
+.sep       { color: #334155; font-size: 0.7rem; user-select: none; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.5} }
 
-/* ── Metric strip ── */
+/* ── Metrics ── */
 [data-testid="stMetric"] {
     background: #1e293b; border: 1px solid #334155;
     border-radius: 10px; padding: 0.6rem 1rem;
@@ -112,10 +125,10 @@ button[kind="secondary"]:hover { border-color: #6366f1 !important; color: #a78bf
 [data-testid="stMetricLabel"] { color: #64748b  !important; font-size: 0.78rem !important; }
 
 /* ── Tabs ── */
-[data-baseweb="tab-list"]                    { gap: 0; border-bottom: 1px solid #334155 !important; background: transparent !important; }
-[data-baseweb="tab"]                         { color: #64748b !important; font-weight: 600; border-radius: 0 !important; background: transparent !important; }
-[data-baseweb="tab"][aria-selected="true"]   { color: #a78bfa !important; border-bottom: 2px solid #6366f1 !important; }
-[data-baseweb="tab-panel"]                   { background: transparent !important; padding-top: 1rem; }
+[data-baseweb="tab-list"]                  { gap: 0; border-bottom: 1px solid #334155 !important; background: transparent !important; }
+[data-baseweb="tab"]                       { color: #64748b !important; font-weight: 600; border-radius: 0 !important; background: transparent !important; }
+[data-baseweb="tab"][aria-selected="true"] { color: #a78bfa !important; border-bottom: 2px solid #6366f1 !important; }
+[data-baseweb="tab-panel"]                 { background: transparent !important; padding-top: 1rem; }
 
 /* ── Approval box ── */
 .approval-box {
@@ -140,15 +153,16 @@ hr { border-color: #334155 !important; }
 /* ── Sidebar ── */
 [data-testid="stSidebar"] .stTextInput input { background: #0f172a !important; }
 .thread-item { padding: 0.45rem 0; border-bottom: 1px solid #1e293b; }
-.thread-active-dot { display:inline-block; width:7px; height:7px; border-radius:50%;
-                     background:#6366f1; margin-right:5px; vertical-align:middle; }
+.user-badge {
+    background: #312e81; border: 1px solid #4338ca;
+    border-radius: 8px; padding: 0.5rem 0.8rem;
+    color: #a5b4fc; font-size: 0.85rem; font-weight: 600;
+    display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;
+}
 
 /* ── Expander ── */
 [data-testid="stExpander"] { background: #1e293b !important; border: 1px solid #334155 !important; border-radius: 10px !important; }
 summary { color: #94a3b8 !important; }
-
-/* ── Status widget ── */
-[data-testid="stStatusWidget"] { background: #1e293b !important; border: 1px solid #334155 !important; border-radius: 10px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -166,14 +180,14 @@ _PIPELINE = [
 ]
 
 _NODE_LABELS = {
-    "supervisor":       "🧠 Supervisor — routing to agents…",
-    "flight_agent":     "✈️  Flight Agent — researching routes & fares…",
-    "hotel_agent":      "🏨 Hotel Agent — finding accommodation…",
-    "weather_agent":    "🌤️  Weather Agent — checking forecasts…",
-    "budget_agent":     "💰 Budget Agent — analysing costs…",
-    "itinerary_agent":  "📋 Itinerary Agent — drafting your plan…",
-    "human_approval":   "👤 Requesting human approval…",
-    "final_response":   "✅ Finalising your travel plan…",
+    "supervisor":      "🧠 Supervisor — routing to agents…",
+    "flight_agent":    "✈️  Flight Agent — researching routes & fares…",
+    "hotel_agent":     "🏨 Hotel Agent — finding accommodation…",
+    "weather_agent":   "🌤️  Weather Agent — checking forecasts…",
+    "budget_agent":    "💰 Budget Agent — analysing costs…",
+    "itinerary_agent": "📋 Itinerary Agent — drafting your plan…",
+    "human_approval":  "👤 Requesting human approval…",
+    "final_response":  "✅ Finalising your travel plan…",
 }
 
 
@@ -181,7 +195,7 @@ _NODE_LABELS = {
 def _render_pipeline(state: dict, active: str | None = None) -> None:
     html = '<div class="pipeline">'
     for i, (icon, label, key) in enumerate(_PIPELINE):
-        val = state.get(key)
+        val  = state.get(key)
         done = bool(val) if not isinstance(val, bool) else (val is not None)
         is_active = active and label.lower() in active.lower()
 
@@ -209,12 +223,12 @@ def _build_markdown_export(state: dict) -> str:
         f"## Request\n{query}\n",
     ]
     for section, key in [
-        ("Flight Information",   "flight_results"),
-        ("Hotel Recommendations","hotel_results"),
-        ("Weather & Climate",    "weather_results"),
-        ("Budget Analysis",      "budget_results"),
-        ("Itinerary Draft",      "itinerary"),
-        ("Final Travel Plan",    "final_response"),
+        ("Flight Information",    "flight_results"),
+        ("Hotel Recommendations", "hotel_results"),
+        ("Weather & Climate",     "weather_results"),
+        ("Budget Analysis",       "budget_results"),
+        ("Itinerary Draft",       "itinerary"),
+        ("Final Travel Plan",     "final_response"),
     ]:
         content = state.get(key, "")
         if content:
@@ -233,9 +247,81 @@ def _merge(base: dict, update: dict) -> dict:
     return base
 
 
-# ── Session defaults ──────────────────────────────────────────────────────────
-if "user_id" not in st.session_state:
-    st.session_state["user_id"] = "demo_user"
+# ══════════════════════════════════════════════════════════════════════════════
+# AUTH GATE — show login/signup page if not authenticated
+# ══════════════════════════════════════════════════════════════════════════════
+if not st.session_state.get("authenticated"):
+
+    # Hide sidebar on auth page
+    st.markdown(
+        "<style>[data-testid='stSidebar']{display:none!important}</style>",
+        unsafe_allow_html=True,
+    )
+
+    _, col, _ = st.columns([1, 1.4, 1])
+    with col:
+        st.markdown('<div class="auth-icon">✈️</div>', unsafe_allow_html=True)
+        st.markdown('<span class="auth-title">AI Travel Planner</span>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="auth-sub">Multi-Agent AI · LangGraph · Groq LLaMA 3.3 70B</div>',
+            unsafe_allow_html=True,
+        )
+
+        tab_in, tab_up = st.tabs(["🔑  Sign In", "🆕  Create Account"])
+
+        # ── Sign In ──────────────────────────────────────────────────────────
+        with tab_in:
+            li_user = st.text_input("Username", key="li_user", placeholder="your username")
+            li_pass = st.text_input("Password", key="li_pass", type="password", placeholder="••••••••")
+
+            if st.button("Sign In", type="primary", use_container_width=True, key="li_btn"):
+                if not li_user.strip() or not li_pass:
+                    st.error("Please enter both username and password.")
+                elif auth.verify_user(li_user, li_pass):
+                    st.session_state["authenticated"] = True
+                    st.session_state["username"]      = li_user.strip().lower()
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid username or password.")
+
+            st.markdown(
+                "<div style='text-align:center;color:#475569;font-size:0.78rem;margin-top:1rem'>"
+                "No account yet? Switch to <b>Create Account</b> tab above.</div>",
+                unsafe_allow_html=True,
+            )
+
+        # ── Create Account ───────────────────────────────────────────────────
+        with tab_up:
+            su_user    = st.text_input("Username",         key="su_user",    placeholder="choose a username")
+            su_pass    = st.text_input("Password",         key="su_pass",    type="password", placeholder="••••••••")
+            su_confirm = st.text_input("Confirm Password", key="su_confirm", type="password", placeholder="••••••••")
+
+            if st.button("Create Account", type="primary", use_container_width=True, key="su_btn"):
+                if not su_user.strip() or not su_pass:
+                    st.error("Username and password are required.")
+                elif su_pass != su_confirm:
+                    st.error("❌ Passwords do not match.")
+                else:
+                    ok, err = auth.create_user(su_user, su_pass)
+                    if ok:
+                        st.session_state["authenticated"] = True
+                        st.session_state["username"]      = su_user.strip().lower()
+                        st.success("Account created! Welcome 🎉")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {err}")
+
+    st.stop()   # ← nothing below renders until the user is logged in
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MAIN APP  (only reached when authenticated)
+# ══════════════════════════════════════════════════════════════════════════════
+username = st.session_state["username"]
+
+# Ensure each user always has an active thread_id
+if "thread_id" not in st.session_state or not st.session_state["thread_id"].startswith(username):
+    st.session_state["thread_id"] = f"{username}_{uuid.uuid4().hex[:8]}"
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -244,33 +330,33 @@ with st.sidebar:
     st.caption("Multi-Agent AI System")
     st.divider()
 
-    # ── Identity
-    st.markdown("**Session**")
-    new_uid = st.text_input("User ID", value=st.session_state["user_id"])
-    if new_uid != st.session_state["user_id"]:
-        st.session_state["user_id"] = new_uid
-        for k in ("thread_id", "latest_result", "waiting_for_approval"):
-            st.session_state.pop(k, None)
+    # ── Logged-in user + logout
+    st.markdown(
+        f'<div class="user-badge">👤 &nbsp;{username}</div>',
+        unsafe_allow_html=True,
+    )
+    if st.button("Logout", use_container_width=True):
+        for key in ("authenticated", "username", "thread_id", "latest_result", "waiting_for_approval"):
+            st.session_state.pop(key, None)
         st.rerun()
 
-    user_id = st.session_state["user_id"]
+    st.divider()
 
-    if "thread_id" not in st.session_state:
-        st.session_state["thread_id"] = f"{user_id}_{uuid.uuid4().hex[:8]}"
-
+    # ── New thread
+    st.markdown("**Session**")
     st.caption(f"Thread: `…{st.session_state['thread_id'][-8:]}`")
 
     if st.button("➕  New Thread", use_container_width=True):
-        st.session_state["thread_id"] = f"{user_id}_{uuid.uuid4().hex[:8]}"
+        st.session_state["thread_id"] = f"{username}_{uuid.uuid4().hex[:8]}"
         for k in ("latest_result", "waiting_for_approval"):
             st.session_state.pop(k, None)
         st.rerun()
 
     st.divider()
 
-    # ── Thread history
+    # ── Thread history — auto-refreshes every rerun
     st.markdown("**🗂  Thread History**")
-    threads = list_threads(user_id)
+    threads = list_threads(username)
 
     if not threads:
         st.caption("No saved threads yet. Run a plan to create one.")
@@ -281,21 +367,21 @@ with st.sidebar:
             title  = (t["query"] or tid)
             title  = title[:34] + "…" if len(title) > 34 else title
             ts     = t["ts"][:16].replace("T", " ") if t["ts"] else "—"
+            dot    = "🟢 " if active else ""
 
-            dot = '<span class="thread-active-dot"></span>' if active else ""
             st.markdown(
                 f'<div class="thread-item">'
-                f'{dot}<b style="color:#e2e8f0;font-size:0.82rem">{title}</b><br>'
+                f'<span style="color:#e2e8f0;font-size:0.82rem">{dot}<b>{title}</b></span><br>'
                 f'<span style="color:#475569;font-size:0.72rem">{ts}</span>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("📂 Load", key=f"load_{tid}", use_container_width=True):
+                if st.button("📂 Open", key=f"load_{tid}", use_container_width=True):
                     vals, waiting = load_thread(tid)
-                    st.session_state["thread_id"]           = tid
-                    st.session_state["latest_result"]       = vals
+                    st.session_state["thread_id"]            = tid
+                    st.session_state["latest_result"]        = vals
                     st.session_state["waiting_for_approval"] = waiting
                     st.rerun()
             with c2:
@@ -304,7 +390,7 @@ with st.sidebar:
                     if active:
                         for k in ("latest_result", "waiting_for_approval"):
                             st.session_state.pop(k, None)
-                        st.session_state["thread_id"] = f"{user_id}_{uuid.uuid4().hex[:8]}"
+                        st.session_state["thread_id"] = f"{username}_{uuid.uuid4().hex[:8]}"
                     st.rerun()
 
     st.divider()
@@ -331,7 +417,7 @@ st.markdown(
 
 config = {"configurable": {"thread_id": st.session_state["thread_id"]}}
 
-# ── Input ─────────────────────────────────────────────────────────────────────
+# ── Query input ───────────────────────────────────────────────────────────────
 query = st.text_area(
     "Travel request",
     placeholder=(
@@ -354,7 +440,7 @@ with col_hint:
     )
 
 
-# ── Run ───────────────────────────────────────────────────────────────────────
+# ── Run agents ────────────────────────────────────────────────────────────────
 if run:
     if not query.strip():
         st.warning("Please enter a travel request first.")
@@ -362,16 +448,16 @@ if run:
         state: dict = {
             "supervisor_reasoning": "", "selected_agents": [],
             "trip_constraints":     {},
-            "flight_results": "",  "hotel_results":   "",
-            "weather_results": "", "budget_results":  "",
-            "itinerary": "",       "final_response":  "",
-            "approved": None,      "llm_calls":       0,
+            "flight_results": "",  "hotel_results":  "",
+            "weather_results": "", "budget_results": "",
+            "itinerary": "",       "final_response": "",
+            "approved": None,      "llm_calls":      0,
         }
         interrupted = False
 
         input_data = {
             "messages":       [HumanMessage(content=query)],
-            "user_id":        user_id,
+            "user_id":        username,
             "user_query":     query,
             "flight_results": "", "hotel_results":  "",
             "weather_results":"", "budget_results": "",
@@ -386,11 +472,10 @@ if run:
                         if node_name == "__interrupt__":
                             interrupted = True
                         else:
-                            label = _NODE_LABELS.get(node_name, f"⚙️  {node_name}…")
-                            status_box.write(label)
+                            status_box.write(_NODE_LABELS.get(node_name, f"⚙️  {node_name}…"))
                             state = _merge(state, node_update)
 
-                # Always re-read authoritative state from checkpointer
+                # Re-read authoritative state from checkpointer
                 saved = app.get_state(config)
                 if saved and saved.values:
                     state = _merge(state, dict(saved.values))
@@ -407,8 +492,9 @@ if run:
                 st.error(f"**Error:** {exc}")
                 st.exception(exc)
 
-        st.session_state["latest_result"]       = state
+        st.session_state["latest_result"]        = state
         st.session_state["waiting_for_approval"] = interrupted
+        # Rerun so the sidebar thread list picks up the newly saved thread
         st.rerun()
 
 
@@ -418,18 +504,13 @@ result = st.session_state.get("latest_result")
 if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_results", "hotel_results")):
     st.divider()
 
-    # Pipeline visualisation
     _render_pipeline(result)
 
-    # Metrics row
-    agents_ran = sum(
-        1 for k in ("flight_results", "hotel_results", "weather_results", "budget_results")
-        if result.get(k)
-    )
-    pending  = st.session_state.get("waiting_for_approval")
-    finished = bool(result.get("final_response"))
+    agents_ran   = sum(1 for k in ("flight_results","hotel_results","weather_results","budget_results") if result.get(k))
+    pending      = st.session_state.get("waiting_for_approval")
+    finished     = bool(result.get("final_response"))
     status_label = "⏸ Awaiting Approval" if pending else ("✅ Complete" if finished else "🔄 In Progress")
-    dest = (result.get("trip_constraints") or {}).get("destination", "—")
+    dest         = (result.get("trip_constraints") or {}).get("destination", "—")
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Agents Run",  agents_ran)
@@ -437,46 +518,24 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_result
     m3.metric("Status",      status_label)
     m4.metric("Destination", dest)
 
-    # Supervisor reasoning (collapsed)
     if result.get("supervisor_reasoning"):
         with st.expander("🧠  Supervisor — routing decision", expanded=False):
             st.markdown(f"**Agents selected:** `{'` · `'.join(result.get('selected_agents', []))}`")
             st.markdown(result["supervisor_reasoning"])
 
-    # Tabbed results
     tab_fl, tab_ht, tab_wx, tab_bud, tab_itin = st.tabs(
         ["✈️  Flights", "🏨  Hotels", "🌤️  Weather", "💰  Budget", "📋  Itinerary"]
     )
     with tab_fl:
-        if result.get("flight_results"):
-            st.markdown(result["flight_results"])
-        else:
-            st.info("Flights were not requested for this plan.")
-
+        st.markdown(result.get("flight_results") or "_Not requested for this plan._")
     with tab_ht:
-        if result.get("hotel_results"):
-            st.markdown(result["hotel_results"])
-        else:
-            st.info("Hotels were not requested for this plan.")
-
+        st.markdown(result.get("hotel_results") or "_Not requested for this plan._")
     with tab_wx:
-        if result.get("weather_results"):
-            st.markdown(result["weather_results"])
-        else:
-            st.info("Weather was not requested for this plan.")
-
+        st.markdown(result.get("weather_results") or "_Not requested for this plan._")
     with tab_bud:
-        if result.get("budget_results"):
-            st.markdown(result["budget_results"])
-        else:
-            st.info("Budget analysis was not requested for this plan.")
-
+        st.markdown(result.get("budget_results") or "_Not requested for this plan._")
     with tab_itin:
-        draft = result.get("itinerary", "")
-        if draft:
-            st.markdown(draft)
-        else:
-            st.info("Itinerary not yet generated.")
+        st.markdown(result.get("itinerary") or "_Not yet generated._")
 
 
 # ── Human Approval panel ──────────────────────────────────────────────────────
@@ -491,30 +550,26 @@ if st.session_state.get("waiting_for_approval"):
     )
 
     decision = st.radio(
-        "Your decision",
+        "Decision",
         ["✅  Approve — looks great!", "✏️  Request revisions"],
         horizontal=True,
         label_visibility="collapsed",
     )
 
     feedback = ""
-    if "Revisions" in decision or "revisions" in decision:
+    if "revisions" in decision.lower():
         feedback = st.text_area(
             "Revision notes",
-            placeholder=(
-                "E.g. Please replace Day 3 with a cooking class, "
-                "add a daily budget breakdown, and remove overnight trains."
-            ),
+            placeholder="E.g. Replace Day 3 with a cooking class and add a per-day budget breakdown.",
         )
 
     if st.button("Submit Decision", type="primary"):
-        is_approved = "Approve" in decision
         with st.spinner("✨  Finalising your travel plan…"):
             final = app.invoke(
-                Command(resume={"approved": is_approved, "feedback": feedback}),
+                Command(resume={"approved": "Approve" in decision, "feedback": feedback}),
                 config=config,
             )
-        st.session_state["latest_result"]       = final
+        st.session_state["latest_result"]        = final
         st.session_state["waiting_for_approval"] = False
         st.rerun()
 
