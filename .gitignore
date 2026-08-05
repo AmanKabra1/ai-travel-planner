@@ -35,8 +35,13 @@ Thumbs.db
 .coverage
 htmlcov/
 
+# ── External MCP dependencies (cloned by users per README) ───────────────────
+# AviationStack MCP is an external repo users clone themselves with uv sync.
+Multi_agent_system_MCP/aviationstack-mcp/
+
 # ── Generated output ──────────────────────────────────────────────────────────
 Multi_agent_system_MCP/travel_plans/
+Multi_agent_system_demo/travel_plans/
 *.md.bak
 
 # ── Streamlit ─────────────────────────────────────────────────────────────────
