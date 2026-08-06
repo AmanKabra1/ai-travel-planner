@@ -18,6 +18,16 @@ from thread_history import list_threads, load_thread, delete_thread
 
 auth.setup()
 
+# ── Auto-login: restore session from URL query param on every page load ────────
+if not st.session_state.get("authenticated"):
+    _tok = st.query_params.get("s", "")
+    if _tok:
+        _saved = auth.validate_session(_tok)
+        if _saved:
+            st.session_state["authenticated"]  = True
+            st.session_state["username"]        = _saved
+            st.session_state["session_token"]   = _tok
+
 st.set_page_config(
     page_title="Wandr — AI Travel Planner",
     page_icon="🌍",
@@ -529,8 +539,11 @@ if not st.session_state.get("authenticated"):
                 if not li_user.strip() or not li_pass:
                     st.error("Please enter both username and password.")
                 elif auth.verify_user(li_user, li_pass):
-                    st.session_state["authenticated"] = True
-                    st.session_state["username"]      = li_user.strip().lower()
+                    _tok = auth.create_session(li_user)
+                    st.session_state["authenticated"]  = True
+                    st.session_state["username"]        = li_user.strip().lower()
+                    st.session_state["session_token"]   = _tok
+                    st.query_params["s"] = _tok
                     st.rerun()
                 else:
                     st.error("Incorrect username or password. Please try again.")
@@ -554,8 +567,11 @@ if not st.session_state.get("authenticated"):
                 else:
                     ok, err = auth.create_user(su_user, su_pass)
                     if ok:
-                        st.session_state["authenticated"] = True
-                        st.session_state["username"]      = su_user.strip().lower()
+                        _tok = auth.create_session(su_user)
+                        st.session_state["authenticated"]  = True
+                        st.session_state["username"]        = su_user.strip().lower()
+                        st.session_state["session_token"]   = _tok
+                        st.query_params["s"] = _tok
                         st.success("Welcome aboard! Your account is ready.")
                         st.rerun()
                     else:
@@ -589,8 +605,9 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     if st.button("Sign Out", use_container_width=True):
-        keys_to_clear = list(st.session_state.keys())
-        for key in keys_to_clear:
+        auth.delete_session(st.session_state.get("session_token", ""))
+        st.query_params.clear()
+        for key in list(st.session_state.keys()):
             st.session_state.pop(key, None)
         st.rerun()
 
@@ -701,6 +718,20 @@ st.markdown(
 config = {"configurable": {"thread_id": st.session_state["thread_id"]}}
 
 
+# ── Detect running state & consume pending run ────────────────────────────────
+_pending_run = st.session_state.pop("pending_run", None)
+_is_running  = st.session_state.get("is_running", False)
+
+if _is_running:
+    st.markdown(
+        "<div style='background:#0c1f38;border:1px solid #0369a1;border-radius:10px;"
+        "padding:0.7rem 1.1rem;margin-bottom:0.8rem;color:#7dd3fc;font-size:0.9rem'>"
+        "🔄 &nbsp;<b>Planning your trip…</b> &nbsp;Inputs are locked while we work."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 # ── Quick destinations ────────────────────────────────────────────────────────
 st.markdown('<div class="chips-label">Popular Destinations — click to fill To field</div>', unsafe_allow_html=True)
 clicked_dest = None
@@ -708,10 +739,10 @@ for row in [_QUICK_DESTINATIONS[:5], _QUICK_DESTINATIONS[5:]]:
     chip_cols = st.columns(5)
     for i, (flag, dest) in enumerate(row):
         with chip_cols[i]:
-            if st.button(f"{flag} {dest}", key=f"chip_{dest}", use_container_width=True):
+            if st.button(f"{flag} {dest}", key=f"chip_{dest}",
+                         use_container_width=True, disabled=_is_running):
                 clicked_dest = dest
 
-# Fill To field when chip clicked
 if clicked_dest:
     st.session_state["to_input"] = clicked_dest
 
@@ -724,6 +755,7 @@ with col_from:
         "From", key="from_input",
         placeholder="e.g. Mumbai, London, New York",
         label_visibility="collapsed",
+        disabled=_is_running,
     )
 with col_arrow:
     st.markdown(
@@ -737,6 +769,7 @@ with col_to:
         "To", key="to_input",
         placeholder="e.g. Tokyo, Paris, Bali",
         label_visibility="collapsed",
+        disabled=_is_running,
     )
 
 
@@ -749,19 +782,21 @@ query = st.text_area(
     ),
     height=100,
     label_visibility="collapsed",
+    disabled=_is_running,
 )
 
 
 # ── Travel style quick-select ─────────────────────────────────────────────────
 st.markdown(
-    '<div class="chips-label" style="margin-top:0.6rem">Travel Style — add to your request</div>',
+    '<div class="chips-label" style="margin-top:0.6rem">Travel Style</div>',
     unsafe_allow_html=True,
 )
 for row in [_TRAVEL_STYLES[:4], _TRAVEL_STYLES[4:]]:
     style_cols = st.columns(4)
     for i, (icon, style) in enumerate(row):
         with style_cols[i]:
-            if st.button(f"{icon} {style}", key=f"style_{style}", use_container_width=True):
+            if st.button(f"{icon} {style}", key=f"style_{style}",
+                         use_container_width=True, disabled=_is_running):
                 st.session_state["_append_style"] = style
 
 if st.session_state.get("_append_style"):
@@ -771,25 +806,27 @@ if st.session_state.get("_append_style"):
 # ── Run button ────────────────────────────────────────────────────────────────
 col_btn, col_hint = st.columns([2, 5])
 with col_btn:
-    run = st.button("✈️  Create My Travel Plan", type="primary", use_container_width=True)
+    run = st.button(
+        "✈️  Create My Travel Plan" if not _is_running else "⏳  Working…",
+        type="primary", use_container_width=True, disabled=_is_running,
+    )
 with col_hint:
     st.markdown(
         "<div style='padding-top:0.65rem;color:#334155;font-size:0.83rem'>"
-        "Flights · Hotels · Weather · Budget · Itinerary · Review &amp; Finalise"
+        "Flights · Trains &amp; Buses · Hotels · Weather · Budget · Itinerary"
         "</div>",
         unsafe_allow_html=True,
     )
 
 
-# ── Run agents ────────────────────────────────────────────────────────────────
-if run:
+# ── Stage 1: Button clicked → save inputs, set running, rerun ─────────────────
+if run and not _is_running:
     _origin = st.session_state.get("from_input", "").strip()
     _dest   = st.session_state.get("to_input",   "").strip()
 
     if not _dest and not query.strip():
         st.warning("Please enter a destination or describe your trip above.")
     else:
-        # Build a complete query that makes origin/destination explicit
         route_prefix = ""
         if _origin and _dest:
             route_prefix = f"Travelling from {_origin} to {_dest}. "
@@ -800,57 +837,73 @@ if run:
 
         enriched_query = (route_prefix + query).strip()
 
-        state: dict = {
-            "supervisor_reasoning": "", "selected_agents": [],
-            "trip_constraints":     {"origin": _origin, "destination": _dest} if (_origin or _dest) else {},
-            "flight_results": "",   "transport_results": "",
-            "hotel_results":  "",   "weather_results":   "",
-            "budget_results": "",   "itinerary":         "",
-            "final_response": "",   "approved": None,
-            "llm_calls":      0,
+        st.session_state["pending_run"] = {
+            "enriched_query": enriched_query,
+            "origin":         _origin,
+            "dest":           _dest,
         }
-        interrupted = False
-
-        input_data = {
-            "messages":          [HumanMessage(content=enriched_query)],
-            "user_id":           username,
-            "user_query":        enriched_query,
-            "flight_results":    "", "transport_results": "",
-            "hotel_results":     "", "weather_results":   "",
-            "budget_results":    "", "itinerary":         "",
-            "final_response":    "", "llm_calls":         0,
-        }
-
-        with st.status("✈️  Researching your perfect trip…", expanded=True) as status_box:
-            try:
-                for chunk in app.stream(input_data, config=config, stream_mode="updates"):
-                    for node_name, node_update in chunk.items():
-                        if node_name == "__interrupt__":
-                            interrupted = True
-                        else:
-                            status_box.write(_NODE_LABELS.get(node_name, f"⚙️  Working…"))
-                            state = _merge(state, node_update)
-
-                saved = app.get_state(config)
-                if saved and saved.values:
-                    state = _merge(state, dict(saved.values))
-                    if not interrupted and saved.next:
-                        interrupted = "human_approval" in saved.next
-
-                if interrupted:
-                    status_box.update(label="✍️  Your itinerary draft is ready — please review below", state="running")
-                else:
-                    status_box.update(label="🎉  Your travel plan is ready!", state="complete")
-
-            except Exception as exc:
-                status_box.update(label="Something went wrong — please try again", state="error")
-                st.error(f"We hit an error while planning your trip: {exc}")
-                st.exception(exc)
-
-        st.session_state["latest_result"]        = state
-        st.session_state["waiting_for_approval"] = interrupted
-        st.session_state["current_thread_query"] = enriched_query
+        st.session_state["is_running"] = True
         st.rerun()
+
+
+# ── Stage 2: Pending run exists → execute agents ──────────────────────────────
+if _pending_run:
+    enriched_query = _pending_run["enriched_query"]
+    _origin        = _pending_run["origin"]
+    _dest          = _pending_run["dest"]
+
+    state: dict = {
+        "supervisor_reasoning": "", "selected_agents": [],
+        "trip_constraints":     {"origin": _origin, "destination": _dest} if (_origin or _dest) else {},
+        "flight_results": "",   "transport_results": "",
+        "hotel_results":  "",   "weather_results":   "",
+        "budget_results": "",   "itinerary":         "",
+        "final_response": "",   "approved": None,
+        "llm_calls":      0,
+    }
+    interrupted = False
+
+    input_data = {
+        "messages":          [HumanMessage(content=enriched_query)],
+        "user_id":           username,
+        "user_query":        enriched_query,
+        "flight_results":    "", "transport_results": "",
+        "hotel_results":     "", "weather_results":   "",
+        "budget_results":    "", "itinerary":         "",
+        "final_response":    "", "llm_calls":         0,
+    }
+
+    with st.status("✈️  Researching your perfect trip…", expanded=True) as status_box:
+        try:
+            for chunk in app.stream(input_data, config=config, stream_mode="updates"):
+                for node_name, node_update in chunk.items():
+                    if node_name == "__interrupt__":
+                        interrupted = True
+                    else:
+                        status_box.write(_NODE_LABELS.get(node_name, f"⚙️  Working…"))
+                        state = _merge(state, node_update)
+
+            saved = app.get_state(config)
+            if saved and saved.values:
+                state = _merge(state, dict(saved.values))
+                if not interrupted and saved.next:
+                    interrupted = "human_approval" in saved.next
+
+            if interrupted:
+                status_box.update(label="✍️  Your itinerary draft is ready — please review below", state="running")
+            else:
+                status_box.update(label="🎉  Your travel plan is ready!", state="complete")
+
+        except Exception as exc:
+            status_box.update(label="Something went wrong — please try again", state="error")
+            st.error(f"We hit an error while planning your trip: {exc}")
+            st.exception(exc)
+
+    st.session_state["latest_result"]        = state
+    st.session_state["waiting_for_approval"] = interrupted
+    st.session_state["current_thread_query"] = enriched_query
+    st.session_state["is_running"]           = False
+    st.rerun()
 
 
 # ── Results ───────────────────────────────────────────────────────────────────
