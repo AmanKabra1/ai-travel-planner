@@ -362,6 +362,7 @@ summary:hover { color: #94a3b8 !important; }
 _PIPELINE = [
     ("🗺️", "Planning",   "supervisor_reasoning"),
     ("✈️", "Flights",    "flight_results"),
+    ("🚂", "Transport",  "transport_results"),
     ("🏨", "Hotels",     "hotel_results"),
     ("🌤️", "Weather",   "weather_results"),
     ("💰", "Budget",     "budget_results"),
@@ -371,14 +372,15 @@ _PIPELINE = [
 ]
 
 _NODE_LABELS = {
-    "supervisor":      "🗺️  Planning your trip…",
-    "flight_agent":    "✈️  Searching flights & routes…",
-    "hotel_agent":     "🏨  Finding the best accommodation…",
-    "weather_agent":   "🌤️  Checking destination weather…",
-    "budget_agent":    "💰  Calculating costs & budget…",
-    "itinerary_agent": "📋  Crafting your day-by-day itinerary…",
-    "human_approval":  "✍️  Ready for your review…",
-    "final_response":  "🎉  Putting the finishing touches…",
+    "supervisor":       "🗺️  Planning your trip…",
+    "flight_agent":     "✈️  Searching flights & routes…",
+    "transport_agent":  "🚂  Finding trains & buses…",
+    "hotel_agent":      "🏨  Finding the best accommodation…",
+    "weather_agent":    "🌤️  Checking destination weather…",
+    "budget_agent":     "💰  Calculating costs & budget…",
+    "itinerary_agent":  "📋  Crafting your day-by-day itinerary…",
+    "human_approval":   "✍️  Ready for your review…",
+    "final_response":   "🎉  Putting the finishing touches…",
 }
 
 _QUICK_DESTINATIONS = [
@@ -438,10 +440,11 @@ def _build_markdown_export(state: dict) -> str:
         f"## Your Request\n{query}\n",
     ]
     for section, key in [
-        ("Flights",           "flight_results"),
-        ("Accommodation",     "hotel_results"),
-        ("Weather & Climate", "weather_results"),
-        ("Budget Breakdown",  "budget_results"),
+        ("Flights",              "flight_results"),
+        ("Trains & Buses",       "transport_results"),
+        ("Accommodation",        "hotel_results"),
+        ("Weather & Climate",    "weather_results"),
+        ("Budget Breakdown",     "budget_results"),
         ("Day-by-Day Itinerary", "itinerary"),
         ("Your Complete Travel Plan", "final_response"),
     ]:
@@ -738,21 +741,22 @@ if run:
         state: dict = {
             "supervisor_reasoning": "", "selected_agents": [],
             "trip_constraints":     {},
-            "flight_results": "",  "hotel_results":  "",
-            "weather_results": "", "budget_results": "",
-            "itinerary": "",       "final_response": "",
-            "approved": None,      "llm_calls":      0,
+            "flight_results": "",   "transport_results": "",
+            "hotel_results":  "",   "weather_results":   "",
+            "budget_results": "",   "itinerary":         "",
+            "final_response": "",   "approved": None,
+            "llm_calls":      0,
         }
         interrupted = False
 
         input_data = {
-            "messages":       [HumanMessage(content=query)],
-            "user_id":        username,
-            "user_query":     query,
-            "flight_results": "", "hotel_results":  "",
-            "weather_results":"", "budget_results": "",
-            "itinerary":      "", "final_response": "",
-            "llm_calls":      0,
+            "messages":          [HumanMessage(content=query)],
+            "user_id":           username,
+            "user_query":        query,
+            "flight_results":    "", "transport_results": "",
+            "hotel_results":     "", "weather_results":   "",
+            "budget_results":    "", "itinerary":         "",
+            "final_response":    "", "llm_calls":         0,
         }
 
         with st.status("✈️  Researching your perfect trip…", expanded=True) as status_box:
@@ -790,13 +794,13 @@ if run:
 # ── Results ───────────────────────────────────────────────────────────────────
 result = st.session_state.get("latest_result")
 
-if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_results", "hotel_results")):
+if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_results", "hotel_results", "transport_results")):
     st.divider()
 
     _render_pipeline(result)
 
     searches_done = sum(
-        1 for k in ("flight_results", "hotel_results", "weather_results", "budget_results")
+        1 for k in ("flight_results", "transport_results", "hotel_results", "weather_results", "budget_results")
         if result.get(k)
     )
     pending       = st.session_state.get("waiting_for_approval")
@@ -811,8 +815,8 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_result
     m3.metric("Duration",      duration)
     m4.metric("Status",        status_label)
 
-    tab_fl, tab_ht, tab_wx, tab_bud, tab_itin = st.tabs(
-        ["✈️  Flights", "🏨  Hotels", "🌤️  Weather", "💰  Budget", "📋  Itinerary"]
+    tab_fl, tab_tr, tab_ht, tab_wx, tab_bud, tab_itin = st.tabs(
+        ["✈️  Flights", "🚂  Trains & Buses", "🏨  Hotels", "🌤️  Weather", "💰  Budget", "📋  Itinerary"]
     )
     with tab_fl:
         content = result.get("flight_results")
@@ -820,7 +824,16 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_result
             st.markdown(content)
         else:
             st.markdown(
-                '<div class="tip-card"><div class="tip-card-text">Flight information was not requested for this plan. Try asking with specific travel dates and departure city.</div></div>',
+                '<div class="tip-card"><div class="tip-card-text">Flight information was not requested for this plan. Try adding specific travel dates and a departure city.</div></div>',
+                unsafe_allow_html=True,
+            )
+    with tab_tr:
+        content = result.get("transport_results")
+        if content:
+            st.markdown(content)
+        else:
+            st.markdown(
+                '<div class="tip-card"><div class="tip-card-text">Train and bus options were not included in this plan.</div></div>',
                 unsafe_allow_html=True,
             )
     with tab_ht:

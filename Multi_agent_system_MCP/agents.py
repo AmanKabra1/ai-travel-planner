@@ -51,6 +51,28 @@ def _parse_json(text: str) -> dict:
     return json.loads(text[start:end])
 
 
+def _extract_tavily_with_urls(raw) -> str:
+    """Parse Tavily MCP output and return markdown-formatted results with links."""
+    text = _extract_text(raw)
+    try:
+        data = json.loads(text)
+        results = data.get("results", [])
+        if results:
+            parts = []
+            for r in results[:6]:
+                title   = r.get("title", "Result")
+                url     = r.get("url", "")
+                content = r.get("content", "")[:450]
+                if url:
+                    parts.append(f"**[{title}]({url})**\n{content}")
+                else:
+                    parts.append(f"**{title}**\n{content}")
+            return "\n\n".join(parts)
+    except (json.JSONDecodeError, AttributeError, KeyError):
+        pass
+    return text
+
+
 # ── Supervisor ────────────────────────────────────────────────────────────────
 
 def supervisor_agent(state: TravelState):
@@ -99,15 +121,16 @@ User request:
 Decide which specialist agents are needed for the user request.
 
 Available agents:
-- flight_agent  : flights, airports, airlines, routes, airfare
-- hotel_agent   : hotels, accommodation, neighbourhood guides
-- weather_agent : weather, climate, seasonal advice, packing
-- budget_agent  : cost breakdown, affordability, money-saving tips
+- flight_agent    : flights, airports, airlines, routes, airfare
+- transport_agent : trains, buses, ferries, local ground transport between cities
+- hotel_agent     : hotels, accommodation, neighbourhood guides, booking links
+- weather_agent   : weather, climate, seasonal advice, packing
+- budget_agent    : cost breakdown, affordability, money-saving tips
 - itinerary_agent : always include — produces the actual travel plan
 
 Return ONLY JSON:
 {{
-  "selected_agents": ["flight_agent", "hotel_agent", "weather_agent", "budget_agent", "itinerary_agent"],
+  "selected_agents": ["flight_agent", "transport_agent", "hotel_agent", "weather_agent", "budget_agent", "itinerary_agent"],
   "trip_constraints": {{
     "destination": "",
     "origin": "",
@@ -128,8 +151,8 @@ User request:
     except (ValueError, json.JSONDecodeError) as exc:
         logger.warning("Routing JSON parse failed: %s. Defaulting all agents.", exc)
         parsed = {
-            "selected_agents":  ["flight_agent", "hotel_agent", "weather_agent",
-                                  "budget_agent", "itinerary_agent"],
+            "selected_agents":  ["flight_agent", "transport_agent", "hotel_agent",
+                                  "weather_agent", "budget_agent", "itinerary_agent"],
             "trip_constraints": {},
             "reasoning":        "Default routing (parse error).",
         }
@@ -193,12 +216,13 @@ fare range, peak-season warnings, and booking tips.
 # ── Hotel agent ───────────────────────────────────────────────────────────────
 
 def hotel_agent(state: TravelState):
-    search_query = f"Best hotels and areas to stay for: {state['user_query']}"
+    destination  = (state.get("trip_constraints") or {}).get("destination", "")
+    search_query = f"Best hotels to book in {destination} for: {state['user_query']}"
     logger.info("Hotel agent — query: %s", search_query[:80])
 
     try:
-        raw         = asyncio.run(tavily_search(search_query))
-        search_text = _extract_text(raw)
+        raw          = asyncio.run(tavily_search(search_query))
+        search_text  = _extract_tavily_with_urls(raw)
     except Exception as exc:
         logger.warning("Hotel Tavily search failed: %s", exc)
         search_text = "Live search unavailable."
@@ -210,11 +234,15 @@ def hotel_agent(state: TravelState):
 User request:
 {state['user_query']}
 
-Search results:
-{search_text[:4000]}
+Search results (with booking links):
+{search_text[:4500]}
 
-Return a clean, readable summary: list recommended areas and specific hotels
-with a short note on vibe and budget level for each. Do not output raw JSON.
+Return a clean, readable markdown summary:
+- Group by area/neighbourhood
+- List 2–4 specific hotels per area with name, price range, vibe
+- For each hotel, include the booking/source link as a Markdown hyperlink like [Hotel Name](URL)
+- Include one direct booking site link per hotel where available (Booking.com, Hotels.com, Agoda, etc.)
+Do not output raw JSON.
 """,
     )
 
@@ -222,6 +250,67 @@ with a short note on vibe and budget level for each. Do not output raw JSON.
         "hotel_results": result,
         "messages":      [AIMessage(content="Hotel agent completed.")],
         "llm_calls":     state.get("llm_calls", 0) + 1,
+    }
+
+
+# ── Transport agent ──────────────────────────────────────────────────────────
+
+def transport_agent(state: TravelState):
+    constraints = state.get("trip_constraints", {})
+    origin      = constraints.get("origin", "")
+    destination = constraints.get("destination", "")
+    logger.info("Transport agent — %s → %s", origin, destination)
+
+    route_str = f"{origin} to {destination}" if origin else destination
+
+    try:
+        train_raw = asyncio.run(tavily_search(
+            f"train {route_str} booking schedule tickets site:booking.com OR site:irctc.co.in OR site:raileurope.com OR site:trainline.com"
+        ))
+        train_text = _extract_tavily_with_urls(train_raw)
+    except Exception as exc:
+        logger.warning("Transport train search failed: %s", exc)
+        train_text = "Train search unavailable."
+
+    try:
+        bus_raw = asyncio.run(tavily_search(
+            f"bus {route_str} booking tickets site:redbus.in OR site:busbud.com OR site:flixbus.com OR site:megabus.com"
+        ))
+        bus_text = _extract_tavily_with_urls(bus_raw)
+    except Exception as exc:
+        logger.warning("Transport bus search failed: %s", exc)
+        bus_text = "Bus search unavailable."
+
+    result = _llm_text(
+        "You are a ground transport specialist for travel planning.",
+        f"""Summarise train and bus options for this traveller.
+
+User request:
+{state['user_query']}
+
+Route: {route_str}
+
+Train search results (with links):
+{train_text[:2500]}
+
+Bus search results (with links):
+{bus_text[:2500]}
+
+Return a clean markdown summary with two sections: **Trains** and **Buses**.
+For each option include:
+- Operator / service name with a booking link as [Operator Name](URL)
+- Approximate journey time and frequency
+- Indicative fare range
+- Any important tips (advance booking, passes, etc.)
+If trains or buses are not relevant for this route (e.g. international long haul), say so briefly.
+Do not output raw JSON.
+""",
+    )
+
+    return {
+        "transport_results": result,
+        "messages":          [AIMessage(content="Transport agent completed.")],
+        "llm_calls":         state.get("llm_calls", 0) + 1,
     }
 
 
@@ -264,6 +353,9 @@ Constraints:
 Flight info:
 {state.get('flight_results', 'N/A')}
 
+Train & bus info:
+{state.get('transport_results', 'N/A')}
+
 Hotel info:
 {state.get('hotel_results', 'N/A')}
 
@@ -271,7 +363,7 @@ Weather info:
 {state.get('weather_results', 'N/A')}
 
 Provide:
-1. Estimated cost by category (flights, accommodation, food, transport, activities)
+1. Estimated cost by category (flights, ground transport, accommodation, food, activities)
 2. Risk areas where costs might blow out
 3. Money-saving tips
 4. Overall feasibility verdict
@@ -302,6 +394,9 @@ Trip constraints:
 
 Flight info:
 {state.get('flight_results', '')}
+
+Train & bus options:
+{state.get('transport_results', '')}
 
 Hotel info:
 {state.get('hotel_results', '')}
@@ -362,9 +457,16 @@ def final_response_agent(state: TravelState):
         prompt = f"""The user approved the draft itinerary.
 
 Produce the final, polished travel plan. Make it beautiful and practical.
+Include hotel booking links and train/bus booking links where available.
 
 Draft itinerary:
 {state.get('itinerary', '')}
+
+Train & bus options (with links):
+{state.get('transport_results', '')}
+
+Hotel recommendations (with links):
+{state.get('hotel_results', '')}
 
 Budget notes:
 {state.get('budget_results', '')}
@@ -381,10 +483,17 @@ Draft itinerary:
 User feedback:
 {state.get('human_feedback', '')}
 
+Train & bus options (with links):
+{state.get('transport_results', '')}
+
+Hotel recommendations (with links):
+{state.get('hotel_results', '')}
+
 Budget notes:
 {state.get('budget_results', '')}
 
 Revise the itinerary to address the user's feedback. Make it final and polished.
+Include clickable links for hotels and transport bookings.
 """
 
     result = _llm_text("You produce final, user-ready travel plans.", prompt)
