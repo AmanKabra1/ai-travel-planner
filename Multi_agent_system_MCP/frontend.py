@@ -279,7 +279,7 @@ if not st.session_state.get("authenticated"):
                     st.error("Please enter both username and password.")
                 elif auth.verify_user(li_user, li_pass):
                     st.session_state["authenticated"] = True
-                    st.session_state["username"]      = li_user.strip().lower()
+                    st.session_state["username"]      = li_user.strip().lower()  # Store lowercase
                     st.rerun()
                 else:
                     st.error("❌ Invalid username or password.")
@@ -305,7 +305,7 @@ if not st.session_state.get("authenticated"):
                     ok, err = auth.create_user(su_user, su_pass)
                     if ok:
                         st.session_state["authenticated"] = True
-                        st.session_state["username"]      = su_user.strip().lower()
+                        st.session_state["username"]      = su_user.strip().lower()  # Store lowercase
                         st.success("Account created! Welcome 🎉")
                         st.rerun()
                     else:
@@ -317,10 +317,10 @@ if not st.session_state.get("authenticated"):
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN APP  (only reached when authenticated)
 # ══════════════════════════════════════════════════════════════════════════════
-username = st.session_state["username"]
+username = st.session_state["username"].strip().lower()
 
-# Ensure each user always has an active thread_id
-if "thread_id" not in st.session_state or not st.session_state["thread_id"].startswith(username):
+# Ensure each user always has an active thread_id with username in the prefix
+if "thread_id" not in st.session_state or not st.session_state["thread_id"].startswith(f"{username}_"):
     st.session_state["thread_id"] = f"{username}_{uuid.uuid4().hex[:8]}"
 
 
@@ -336,7 +336,9 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     if st.button("Logout", use_container_width=True):
-        for key in ("authenticated", "username", "thread_id", "latest_result", "waiting_for_approval"):
+        # Clear all session state on logout
+        keys_to_clear = list(st.session_state.keys())
+        for key in keys_to_clear:
             st.session_state.pop(key, None)
         st.rerun()
 
@@ -347,7 +349,7 @@ with st.sidebar:
     st.caption(f"Thread: `…{st.session_state['thread_id'][-8:]}`")
 
     if st.button("➕  New Thread", use_container_width=True):
-        st.session_state["thread_id"] = f"{username}_{uuid.uuid4().hex[:8]}"
+        st.session_state["thread_id"] = f"{username}_{uuid.uuid4().hex[:8]}"  # username already lowercased
         for k in ("latest_result", "waiting_for_approval"):
             st.session_state.pop(k, None)
         st.rerun()
@@ -390,6 +392,7 @@ with st.sidebar:
                     if active:
                         for k in ("latest_result", "waiting_for_approval"):
                             st.session_state.pop(k, None)
+                        # Create new thread with lowercased username
                         st.session_state["thread_id"] = f"{username}_{uuid.uuid4().hex[:8]}"
                     st.rerun()
 
