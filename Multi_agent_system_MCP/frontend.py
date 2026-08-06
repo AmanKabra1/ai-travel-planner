@@ -165,6 +165,32 @@ label { color: #94a3b8 !important; }
 /* ── No text-wrap on all buttons ── */
 button p { white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; }
 
+/* ── Route row (From → To) ── */
+.route-row {
+    display: flex; align-items: center; gap: 0; margin-bottom: 1rem;
+}
+.route-arrow {
+    color: #0ea5e9; font-size: 1.6rem; font-weight: 300;
+    padding: 0 0.6rem; padding-top: 1.6rem; flex-shrink: 0;
+    user-select: none;
+}
+.route-label {
+    font-size: 0.73rem; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #334155; margin-bottom: 3px;
+}
+/* Highlight the from/to inputs differently from the query textarea */
+div[data-testid="stTextInput"]:has(input[aria-label="From"]) input,
+div[data-testid="stTextInput"]:has(input[aria-label="To"]) input {
+    border-color: #1a3a6b !important;
+    border-radius: 10px !important;
+    font-size: 0.95rem !important;
+    font-weight: 500 !important;
+}
+div[data-testid="stTextInput"]:has(input[aria-label="To"]) input {
+    border-color: #0369a1 !important;
+    background: #0c1f38 !important;
+}
+
 /* ── Primary button ── */
 button[kind="primary"] {
     background: linear-gradient(135deg, #0369a1, #0ea5e9) !important;
@@ -676,7 +702,7 @@ config = {"configurable": {"thread_id": st.session_state["thread_id"]}}
 
 
 # ── Quick destinations ────────────────────────────────────────────────────────
-st.markdown('<div class="chips-label">Popular Destinations</div>', unsafe_allow_html=True)
+st.markdown('<div class="chips-label">Popular Destinations — click to fill To field</div>', unsafe_allow_html=True)
 clicked_dest = None
 for row in [_QUICK_DESTINATIONS[:5], _QUICK_DESTINATIONS[5:]]:
     chip_cols = st.columns(5)
@@ -685,21 +711,43 @@ for row in [_QUICK_DESTINATIONS[:5], _QUICK_DESTINATIONS[5:]]:
             if st.button(f"{flag} {dest}", key=f"chip_{dest}", use_container_width=True):
                 clicked_dest = dest
 
-
-# ── Query input ───────────────────────────────────────────────────────────────
-default_query = ""
+# Fill To field when chip clicked
 if clicked_dest:
-    default_query = f"Plan a trip to {clicked_dest}. "
+    st.session_state["to_input"] = clicked_dest
 
+
+# ── From / To route row ───────────────────────────────────────────────────────
+col_from, col_arrow, col_to = st.columns([10, 1, 10])
+with col_from:
+    st.markdown('<div class="route-label">🛫 From — Departure city</div>', unsafe_allow_html=True)
+    origin = st.text_input(
+        "From", key="from_input",
+        placeholder="e.g. Mumbai, London, New York",
+        label_visibility="collapsed",
+    )
+with col_arrow:
+    st.markdown(
+        "<div style='text-align:center;padding-top:1.55rem;color:#0ea5e9;"
+        "font-size:1.5rem;user-select:none'>→</div>",
+        unsafe_allow_html=True,
+    )
+with col_to:
+    st.markdown('<div class="route-label">🛬 To — Destination</div>', unsafe_allow_html=True)
+    destination = st.text_input(
+        "To", key="to_input",
+        placeholder="e.g. Tokyo, Paris, Bali",
+        label_visibility="collapsed",
+    )
+
+
+# ── Travel details textarea ───────────────────────────────────────────────────
 query = st.text_area(
-    "Travel request",
-    value=default_query,
+    "Travel details",
     placeholder=(
-        "Example: Plan a 7-day trip to Japan for 2 people under ₹1.5 lakh per person. "
-        "We love street food, temples, and a mix of modern city life with nature. "
-        "Prefer budget-friendly hotels, no overnight flights."
+        "Duration, budget, number of travellers, hotel preference, must-do activities…\n"
+        "Example: 7 days for 2 people, budget ₹1.5 lakh per person, love street food and temples, prefer mid-range hotels."
     ),
-    height=115,
+    height=100,
     label_visibility="collapsed",
 )
 
@@ -735,12 +783,26 @@ with col_hint:
 
 # ── Run agents ────────────────────────────────────────────────────────────────
 if run:
-    if not query.strip():
-        st.warning("Please describe your trip above — destination, duration, budget, and preferences.")
+    _origin = st.session_state.get("from_input", "").strip()
+    _dest   = st.session_state.get("to_input",   "").strip()
+
+    if not _dest and not query.strip():
+        st.warning("Please enter a destination or describe your trip above.")
     else:
+        # Build a complete query that makes origin/destination explicit
+        route_prefix = ""
+        if _origin and _dest:
+            route_prefix = f"Travelling from {_origin} to {_dest}. "
+        elif _dest:
+            route_prefix = f"Destination: {_dest}. "
+        elif _origin:
+            route_prefix = f"Departing from {_origin}. "
+
+        enriched_query = (route_prefix + query).strip()
+
         state: dict = {
             "supervisor_reasoning": "", "selected_agents": [],
-            "trip_constraints":     {},
+            "trip_constraints":     {"origin": _origin, "destination": _dest} if (_origin or _dest) else {},
             "flight_results": "",   "transport_results": "",
             "hotel_results":  "",   "weather_results":   "",
             "budget_results": "",   "itinerary":         "",
@@ -750,9 +812,9 @@ if run:
         interrupted = False
 
         input_data = {
-            "messages":          [HumanMessage(content=query)],
+            "messages":          [HumanMessage(content=enriched_query)],
             "user_id":           username,
-            "user_query":        query,
+            "user_query":        enriched_query,
             "flight_results":    "", "transport_results": "",
             "hotel_results":     "", "weather_results":   "",
             "budget_results":    "", "itinerary":         "",
@@ -781,13 +843,13 @@ if run:
                     status_box.update(label="🎉  Your travel plan is ready!", state="complete")
 
             except Exception as exc:
-                status_box.update(label="Something went wrong", state="error")
+                status_box.update(label="Something went wrong — please try again", state="error")
                 st.error(f"We hit an error while planning your trip: {exc}")
                 st.exception(exc)
 
         st.session_state["latest_result"]        = state
         st.session_state["waiting_for_approval"] = interrupted
-        st.session_state["current_thread_query"] = query
+        st.session_state["current_thread_query"] = enriched_query
         st.rerun()
 
 
