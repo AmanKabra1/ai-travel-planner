@@ -360,6 +360,18 @@ with st.sidebar:
     st.markdown("**🗂  Thread History**")
     threads = list_threads(username)
 
+    # If a plan just finished, add the current thread to the list if not already there
+    current_tid = st.session_state.get("thread_id", "")
+    current_query = st.session_state.get("current_thread_query", "")
+    if current_query and current_tid:
+        thread_ids_in_list = [t["thread_id"] for t in threads]
+        if current_tid not in thread_ids_in_list:
+            threads.insert(0, {
+                "thread_id": current_tid,
+                "ts": datetime.now().isoformat(),
+                "query": current_query,
+            })
+
     if not threads:
         st.caption("No saved threads yet. Run a plan to create one.")
     else:
@@ -497,6 +509,8 @@ if run:
 
         st.session_state["latest_result"]        = state
         st.session_state["waiting_for_approval"] = interrupted
+        # Store the current thread info in session for sidebar to find immediately
+        st.session_state["current_thread_query"] = query
         # Rerun so the sidebar thread list picks up the newly saved thread
         st.rerun()
 
