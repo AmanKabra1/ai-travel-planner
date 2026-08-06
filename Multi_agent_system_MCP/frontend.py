@@ -162,6 +162,9 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus {
 label { color: #94a3b8 !important; }
 .stTextArea label { display: none; }
 
+/* ── No text-wrap on all buttons ── */
+button p { white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; }
+
 /* ── Primary button ── */
 button[kind="primary"] {
     background: linear-gradient(135deg, #0369a1, #0ea5e9) !important;
@@ -671,12 +674,13 @@ config = {"configurable": {"thread_id": st.session_state["thread_id"]}}
 
 # ── Quick destinations ────────────────────────────────────────────────────────
 st.markdown('<div class="chips-label">Popular Destinations</div>', unsafe_allow_html=True)
-chip_cols = st.columns(len(_QUICK_DESTINATIONS))
 clicked_dest = None
-for i, (flag, dest) in enumerate(_QUICK_DESTINATIONS):
-    with chip_cols[i]:
-        if st.button(f"{flag} {dest}", key=f"chip_{dest}", use_container_width=True):
-            clicked_dest = dest
+for row in [_QUICK_DESTINATIONS[:5], _QUICK_DESTINATIONS[5:]]:
+    chip_cols = st.columns(5)
+    for i, (flag, dest) in enumerate(row):
+        with chip_cols[i]:
+            if st.button(f"{flag} {dest}", key=f"chip_{dest}", use_container_width=True):
+                clicked_dest = dest
 
 
 # ── Query input ───────────────────────────────────────────────────────────────
@@ -702,11 +706,12 @@ st.markdown(
     '<div class="chips-label" style="margin-top:0.6rem">Travel Style — add to your request</div>',
     unsafe_allow_html=True,
 )
-style_cols = st.columns(len(_TRAVEL_STYLES))
-for i, (icon, style) in enumerate(_TRAVEL_STYLES):
-    with style_cols[i]:
-        if st.button(f"{icon} {style}", key=f"style_{style}", use_container_width=True):
-            st.session_state["_append_style"] = style
+for row in [_TRAVEL_STYLES[:4], _TRAVEL_STYLES[4:]]:
+    style_cols = st.columns(4)
+    for i, (icon, style) in enumerate(row):
+        with style_cols[i]:
+            if st.button(f"{icon} {style}", key=f"style_{style}", use_container_width=True):
+                st.session_state["_append_style"] = style
 
 if st.session_state.get("_append_style"):
     st.session_state.pop("_append_style")
