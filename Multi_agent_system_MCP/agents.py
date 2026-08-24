@@ -6,7 +6,7 @@ import re
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.types import interrupt
 
-from config import get_llm
+from config import GROQ_FALLBACKS, get_llm
 from mcp_client import current_weather, forecast, list_airlines, list_airports, tavily_search
 from nearby_api import (
     bucket_pois,
@@ -25,11 +25,24 @@ llm = get_llm()
 # ── Utilities ─────────────────────────────────────────────────────────────────
 
 def _llm_text(system: str, prompt: str) -> str:
-    response = llm.invoke([
-        SystemMessage(content=system),
-        HumanMessage(content=prompt),
-    ])
-    return response.content
+    global llm
+    msgs = [SystemMessage(content=system), HumanMessage(content=prompt)]
+    tried = set()
+    for attempt in range(len(GROQ_FALLBACKS)):
+        try:
+            return llm.invoke(msgs).content
+        except Exception as exc:
+            msg = str(exc)
+            if "404" not in msg and "model" not in msg.lower() and "not found" not in msg.lower():
+                raise
+            current = getattr(llm, "model_name", "")
+            tried.add(current)
+            next_models = [m for m in GROQ_FALLBACKS if m not in tried]
+            if not next_models:
+                raise
+            llm = get_llm(next_models[0])
+            logger.warning("Groq model %s returned 404; switching to %s", current, next_models[0])
+    raise RuntimeError("All Groq models exhausted")
 
 
 def _extract_text(mcp_result) -> str:

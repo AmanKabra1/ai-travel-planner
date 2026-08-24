@@ -36,6 +36,14 @@ OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 DATABASE_URL        = os.getenv("DATABASE_URL")
 
 
-def get_llm():
-    """Return a configured ChatGroq instance using the env-specified model."""
-    return ChatGroq(model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
+GROQ_FALLBACKS = [
+    "llama-3.3-70b-versatile",
+    "llama3-70b-8192",
+    "llama-3.1-70b-versatile",
+    "llama3-8b-8192",
+]
+
+def get_llm(model: str | None = None):
+    """Return a configured ChatGroq instance."""
+    m = model or os.getenv("GROQ_MODEL") or GROQ_FALLBACKS[0]
+    return ChatGroq(model=m)

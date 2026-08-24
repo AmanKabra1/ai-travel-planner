@@ -170,19 +170,24 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus {
     border-color: #0ea5e9 !important;
     box-shadow: 0 0 0 3px rgba(14,165,233,.15) !important;
 }
-/* ── Kill ALL red borders (Streamlit BaseWeb validation) ── */
-[data-baseweb="input"] > div,
-[data-baseweb="input"] > div:first-child { border-color: #1a3a6b !important; }
-[data-baseweb="input"]:focus-within > div,
-[data-baseweb="input"]:focus-within > div:first-child {
+/* ── Kill ALL red/orange borders — Streamlit uses data-baseweb="base-input" ── */
+[data-baseweb="base-input"],
+[data-baseweb="input"],
+[data-baseweb="base-input"] > div,
+[data-baseweb="input"] > div { border-color: #1a3a6b !important; box-shadow: none !important; }
+
+[data-baseweb="base-input"]:focus-within,
+[data-baseweb="input"]:focus-within {
     border-color: #0ea5e9 !important;
     box-shadow: 0 0 0 3px rgba(14,165,233,.15) !important;
 }
-[data-testid="stTextInput"] [data-baseweb="input"] > div { border-color: #1a3a6b !important; }
-[data-testid="stTextInput"] [data-baseweb="input"]:focus-within > div { border-color: #0ea5e9 !important; }
-input:invalid, input[aria-invalid="true"] {
-    border-color: #1a3a6b !important; box-shadow: none !important;
-}
+/* Catch inline-style red borders Streamlit injects on validation */
+input:focus { outline: none !important; }
+input:invalid, input[aria-invalid="true"],
+textarea:invalid { border-color: #1a3a6b !important; box-shadow: none !important; }
+/* Nuke any remaining red with an attribute-value wildcard */
+[style*="rgb(255, 75, 75)"] { color: #94a3b8 !important; }
+[style*="border-color: rgb(255"] { border-color: #1a3a6b !important; }
 label { color: #94a3b8 !important; }
 .stTextArea label { display: none; }
 
@@ -809,9 +814,9 @@ def _merge(base: dict, update: dict) -> dict:
     return base
 
 
-# ── Shared plan public view — ?share=<uuid> bypasses auth gate ────────────────
+# ── Shared plan public view — ?share=<uuid> works for everyone ───────────────
 _share_param = st.query_params.get("share", "")
-if _share_param and not st.session_state.get("authenticated"):
+if _share_param:
     _shared = auth.load_share(_share_param)
     if _shared:
         st.markdown(
@@ -834,11 +839,17 @@ if _share_param and not st.session_state.get("authenticated"):
             st.divider()
             st.markdown(_shared["nearby_results"])
         st.divider()
-        st.markdown(
-            "<div style='text-align:center;color:#334155;font-size:0.82rem'>"
-            "Plan your own trip at <b style='color:#0ea5e9'>Wandr</b> — AI Travel Planner</div>",
-            unsafe_allow_html=True,
-        )
+        _back_col, _brand_col = st.columns([1, 3])
+        with _back_col:
+            if st.button("← Back to my trips", use_container_width=True):
+                st.query_params.clear()
+                st.rerun()
+        with _brand_col:
+            st.markdown(
+                "<div style='padding-top:0.5rem;color:#334155;font-size:0.82rem'>"
+                "Plan your own trip at <b style='color:#0ea5e9'>Wandr</b> — AI Travel Planner</div>",
+                unsafe_allow_html=True,
+            )
         st.stop()
     else:
         st.warning("This share link is invalid or has expired.")
