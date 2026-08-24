@@ -61,6 +61,7 @@ orjson==3.11.9
 ormsgpack==1.12.2
 packaging==26.2
 pandas==3.0.3
+fpdf2==2.7.9
 pillow==12.2.0
 propcache==0.5.2
 protobuf==7.35.0

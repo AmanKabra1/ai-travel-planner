@@ -129,17 +129,15 @@ User request:
 Decide which specialist agents are needed for the user request.
 
 Available agents:
-- flight_agent    : flights, airports, airlines, routes, airfare
-- transport_agent : trains, buses, ferries, local ground transport between cities
-- hotel_agent     : hotels, accommodation, neighbourhood guides, booking links
-- weather_agent   : weather, climate, seasonal advice, packing
-- nearby_agent    : discovers nearby attractions within 10/30/50/100 km — temples, waterfalls, parks, viewpoints, local food & culture from open data
-- budget_agent    : cost breakdown, affordability, money-saving tips
+- flight_agent  : flights, airports, airlines, routes, airfare
+- hotel_agent   : hotels, accommodation, neighbourhood guides
+- weather_agent : weather, climate, seasonal advice, packing
+- budget_agent  : cost breakdown, affordability, money-saving tips
 - itinerary_agent : always include — produces the actual travel plan
 
 Return ONLY JSON:
 {{
-  "selected_agents": ["flight_agent", "transport_agent", "hotel_agent", "weather_agent", "nearby_agent", "budget_agent", "itinerary_agent"],
+  "selected_agents": ["flight_agent", "hotel_agent", "weather_agent", "budget_agent", "itinerary_agent"],
   "trip_constraints": {{
     "destination": "",
     "origin": "",
@@ -160,8 +158,8 @@ User request:
     except (ValueError, json.JSONDecodeError) as exc:
         logger.warning("Routing JSON parse failed: %s. Defaulting all agents.", exc)
         parsed = {
-            "selected_agents":  ["flight_agent", "transport_agent", "hotel_agent",
-                                  "weather_agent", "nearby_agent", "budget_agent", "itinerary_agent"],
+            "selected_agents":  ["flight_agent", "hotel_agent", "weather_agent",
+                                  "budget_agent", "itinerary_agent"],
             "trip_constraints": {},
             "reasoning":        "Default routing (parse error).",
         }
@@ -628,8 +626,8 @@ User's full request:
 ═══ PRE-FETCHED FLIGHTS DATA ═══
 {state.get('flight_results', 'Not fetched.')}
 
-═══ PRE-FETCHED TRAINS & BUSES DATA (with booking links) ═══
-{state.get('transport_results', 'Not fetched.')}
+Flight info:
+{state.get('flight_results', '')}
 
 ═══ PRE-FETCHED HOTELS DATA (with booking links) ═══
 {state.get('hotel_results', 'Not fetched.')}

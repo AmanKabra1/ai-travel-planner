@@ -665,6 +665,127 @@ def _build_print_html(state: dict) -> str:
 </html>"""
 
 
+def _build_pdf_bytes(state: dict) -> bytes:
+    """Generate a well-designed PDF travel plan using fpdf2."""
+    import re
+    from fpdf import FPDF
+
+    dest      = (state.get("trip_constraints") or {}).get("destination", "Trip")
+    s_date    = (state.get("trip_constraints") or {}).get("start_date", "")
+    e_date    = (state.get("trip_constraints") or {}).get("end_date", "")
+    members   = (state.get("trip_constraints") or {}).get("members", "")
+    query     = state.get("user_query", "")
+    now       = datetime.now().strftime("%d %b %Y")
+
+    sections = [
+        ("Complete Itinerary",    state.get("final_response") or state.get("itinerary", "")),
+        ("Flights",               state.get("flight_results", "")),
+        ("Trains & Buses",        state.get("transport_results", "")),
+        ("Hotels",                state.get("hotel_results", "")),
+        ("Weather",               state.get("weather_results", "")),
+        ("Nearby Attractions",    state.get("nearby_results", "")),
+        ("Budget Breakdown",      state.get("budget_results", "")),
+    ]
+
+    def _clean(text: str) -> str:
+        text = re.sub(r"\*{1,3}(.*?)\*{1,3}", r"\1", text)
+        text = re.sub(r"`{1,3}.*?`{1,3}", "", text, flags=re.DOTALL)
+        text = re.sub(r"#{1,6}\s*", "", text)
+        text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
+        text = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", text)
+        text = re.sub(r"^[-*]\s+", "  • ", text, flags=re.MULTILINE)
+        text = re.sub(r"^\|.*\|$", "", text, flags=re.MULTILINE)
+        text = re.sub(r"^[-|: ]+$", "", text, flags=re.MULTILINE)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.set_margins(left=18, top=18, right=18)
+
+    # ── Cover page ──
+    pdf.add_page()
+    pdf.set_fill_color(3, 105, 161)
+    pdf.rect(0, 0, 210, 60, "F")
+
+    pdf.set_y(14)
+    pdf.set_font("Helvetica", "B", 28)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 12, "Wandr", ln=True, align="C")
+
+    pdf.set_font("Helvetica", "", 13)
+    pdf.set_text_color(186, 230, 253)
+    pdf.cell(0, 7, "AI Travel Planner", ln=True, align="C")
+
+    pdf.set_y(70)
+    pdf.set_font("Helvetica", "B", 22)
+    pdf.set_text_color(3, 105, 161)
+    dest_clean = _clean(dest)
+    pdf.cell(0, 10, f"Travel Plan — {dest_clean}", ln=True, align="C")
+
+    pdf.set_font("Helvetica", "", 11)
+    pdf.set_text_color(71, 85, 105)
+    if s_date or e_date:
+        pdf.cell(0, 7, f"{s_date}  to  {e_date}  |  {members} traveller(s)", ln=True, align="C")
+    pdf.cell(0, 6, f"Generated: {now}", ln=True, align="C")
+
+    pdf.ln(8)
+    pdf.set_draw_color(14, 165, 233)
+    pdf.set_line_width(0.6)
+    pdf.line(18, pdf.get_y(), 192, pdf.get_y())
+    pdf.ln(6)
+
+    if query:
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.set_text_color(3, 105, 161)
+        pdf.cell(0, 7, "Your Request", ln=True)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(51, 65, 85)
+        pdf.multi_cell(0, 5.5, _clean(query)[:600])
+        pdf.ln(4)
+
+    # ── Content sections ──
+    for title, content in sections:
+        if not content or not content.strip():
+            continue
+
+        pdf.add_page()
+
+        # Section header bar
+        pdf.set_fill_color(240, 249, 255)
+        pdf.set_draw_color(14, 165, 233)
+        pdf.set_line_width(0.4)
+        x, y = pdf.get_x(), pdf.get_y()
+        pdf.rect(18, y, 174, 10, "FD")
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.set_text_color(3, 105, 161)
+        pdf.set_xy(22, y + 1.5)
+        pdf.cell(0, 7, title)
+        pdf.ln(14)
+
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(30, 41, 59)
+        cleaned = _clean(content)
+        for para in cleaned.split("\n"):
+            para = para.strip()
+            if not para:
+                pdf.ln(3)
+                continue
+            if para.startswith("•"):
+                pdf.set_x(22)
+                pdf.multi_cell(170, 5.5, para)
+            else:
+                pdf.multi_cell(0, 5.5, para)
+
+    # ── Footer on every page ──
+    pdf.set_y(-14)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(148, 163, 184)
+    pdf.cell(0, 5, f"Wandr — AI Travel Planner  |  {dest_clean}  |  {now}", align="C")
+
+    return bytes(pdf.output())
+
+
 def _merge(base: dict, update: dict) -> dict:
     for k, v in update.items():
         if k == "messages" and isinstance(v, list):
@@ -1350,10 +1471,10 @@ if final and final.get("final_response"):
 
     with col_pdf:
         st.download_button(
-            label="🖨️  Export as HTML",
-            data=_build_print_html(final).encode("utf-8"),
-            file_name=f"travel_plan_{dest_label.replace(' ', '_').lower()}.html",
-            mime="text/html",
+            label="📄  Download PDF",
+            data=_build_pdf_bytes(final),
+            file_name=f"travel_plan_{dest_label.replace(' ', '_').lower()}.pdf",
+            mime="application/pdf",
             use_container_width=True,
         )
 

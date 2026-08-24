@@ -40,11 +40,9 @@ ROUTE_MAP = {
 
 def _selected_agents(state: TravelState) -> list[str]:
     selected = state.get("selected_agents") or []
-    # Preserve ordering based on AGENT_ORDER.
     return [agent for agent in AGENT_ORDER if agent in selected]
 
 
-# First agent after supervisor
 def route_from_supervisor(state: TravelState) -> str:
     selected = _selected_agents(state)
     return selected[0] if selected else "itinerary_agent"
@@ -54,32 +52,29 @@ def route_after_agent(current_agent: str):
     def route(state: TravelState) -> str:
         selected = _selected_agents(state)
         current_index = AGENT_ORDER.index(current_agent)
-
         for next_agent in AGENT_ORDER[current_index + 1:]:
             if next_agent in selected:
                 return next_agent
-
         return "itinerary_agent"
-
     return route
 
 
 def build_graph():
     graph = StateGraph(TravelState)
 
-    graph.add_node("supervisor", supervisor_agent)
-    graph.add_node("flight_agent", flight_agent)
+    graph.add_node("supervisor",      supervisor_agent)
+    graph.add_node("flight_agent",    flight_agent)
     graph.add_node("transport_agent", transport_agent)
-    graph.add_node("hotel_agent", hotel_agent)
-    graph.add_node("weather_agent", weather_agent)
-    graph.add_node("nearby_agent", nearby_agent)
-    graph.add_node("budget_agent", budget_agent)
+    graph.add_node("hotel_agent",     hotel_agent)
+    graph.add_node("weather_agent",   weather_agent)
+    graph.add_node("nearby_agent",    nearby_agent)
+    graph.add_node("budget_agent",    budget_agent)
     graph.add_node("itinerary_agent", itinerary_agent)
-    graph.add_node("human_approval", human_approval_agent)
-    graph.add_node("final_response", final_response_agent)
+    graph.add_node("human_approval",  human_approval_agent)
+    graph.add_node("final_response",  final_response_agent)
 
     graph.add_edge(START, "supervisor")
-    graph.add_conditional_edges("supervisor",       route_from_supervisor,             ROUTE_MAP)
+    graph.add_conditional_edges("supervisor",       route_from_supervisor,              ROUTE_MAP)
     graph.add_conditional_edges("flight_agent",     route_after_agent("flight_agent"),    ROUTE_MAP)
     graph.add_conditional_edges("transport_agent",  route_after_agent("transport_agent"), ROUTE_MAP)
     graph.add_conditional_edges("hotel_agent",      route_after_agent("hotel_agent"),     ROUTE_MAP)
@@ -87,8 +82,8 @@ def build_graph():
     graph.add_conditional_edges("nearby_agent",     route_after_agent("nearby_agent"),    ROUTE_MAP)
     graph.add_conditional_edges("budget_agent",     route_after_agent("budget_agent"),    ROUTE_MAP)
     graph.add_edge("itinerary_agent", "human_approval")
-    graph.add_edge("human_approval", "final_response")
-    graph.add_edge("final_response", END)
+    graph.add_edge("human_approval",  "final_response")
+    graph.add_edge("final_response",  END)
 
     if DATABASE_URL:
         conn = psycopg.connect(DATABASE_URL)

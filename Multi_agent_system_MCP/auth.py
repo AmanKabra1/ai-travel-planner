@@ -15,7 +15,7 @@ from config import DATABASE_URL
 
 logger = logging.getLogger(__name__)
 
-SESSION_DAYS = 30  # session token lifetime
+SESSION_DAYS = 30
 
 
 def _hash(password: str) -> str:
@@ -23,7 +23,7 @@ def _hash(password: str) -> str:
 
 
 def setup() -> None:
-    """Create users and sessions tables if they do not already exist."""
+    """Create all tables if they do not already exist."""
     with psycopg.connect(DATABASE_URL) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
