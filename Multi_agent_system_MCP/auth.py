@@ -24,7 +24,7 @@ def _hash(password: str) -> str:
 
 def setup() -> None:
     """Create all tables if they do not already exist."""
-    with psycopg.connect(DATABASE_URL) as conn:
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 username      TEXT PRIMARY KEY,

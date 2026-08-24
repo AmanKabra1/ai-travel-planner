@@ -86,7 +86,10 @@ def build_graph():
     graph.add_edge("final_response",  END)
 
     if DATABASE_URL:
-        conn = psycopg.connect(DATABASE_URL)
+        # autocommit=True is required for DDL (CREATE TABLE) statements in
+        # checkpointer.setup() — without it psycopg wraps everything in a
+        # transaction and Neon's PgBouncer pooler raises ActiveSqlTransaction.
+        conn = psycopg.connect(DATABASE_URL, autocommit=True)
         checkpointer = PostgresSaver(conn)
         checkpointer.setup()
         return graph.compile(checkpointer=checkpointer)
