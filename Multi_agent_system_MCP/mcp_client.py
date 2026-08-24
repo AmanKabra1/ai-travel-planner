@@ -27,7 +27,11 @@ if os.name == "nt":
 else:
     _default_aviation_python = os.path.join(HERE, "aviationstack-mcp", ".venv", "bin", "python")
 
-AVIATION_PYTHON = os.getenv("AVIATION_MCP_PYTHON", _default_aviation_python)
+# On Streamlit Cloud (or any env where the local venv is absent),
+# fall back to the current interpreter — aviationstack-mcp is installed
+# as a package via requirements.txt so it's available there.
+_resolved = os.getenv("AVIATION_MCP_PYTHON", _default_aviation_python)
+AVIATION_PYTHON = _resolved if os.path.exists(_resolved) else sys.executable
 
 WEATHER_SERVER = os.path.join(HERE, "weather_mcp_server.py")
 
