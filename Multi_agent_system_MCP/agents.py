@@ -6,7 +6,7 @@ import re
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.types import interrupt
 
-from config import GROQ_FALLBACKS, get_llm
+from config import GROQ_FALLBACKS, get_llm, get_retry_models
 from mcp_client import current_weather, forecast, list_airlines, list_airports, tavily_search
 from nearby_api import (
     bucket_pois,
@@ -25,17 +25,22 @@ llm = get_llm()
 # ── Utilities ─────────────────────────────────────────────────────────────────
 
 def _llm_text(system: str, prompt: str) -> str:
-    """Call the LLM, auto-switching to the next model on any API error."""
+    """Call the LLM, auto-switching to the next model on any API error.
+
+    Uses the live Groq model list (fetched at startup) so we only try real,
+    current model IDs — not stale ones from the static GROQ_FALLBACKS list.
+    """
     global llm
     msgs = [SystemMessage(content=system), HumanMessage(content=prompt)]
+    retry_list = get_retry_models()   # live IDs from Groq /models API
     tried: set[str] = set()
-    for _ in range(len(GROQ_FALLBACKS) + 1):
+    for _ in range(len(retry_list) + 1):
         current = getattr(llm, "model_name", "") or getattr(llm, "model", "")
         try:
             return llm.invoke(msgs).content
         except Exception as exc:
             tried.add(current)
-            next_models = [m for m in GROQ_FALLBACKS if m not in tried]
+            next_models = [m for m in retry_list if m not in tried]
             if not next_models:
                 raise RuntimeError(f"All Groq models failed. Last: {current} — {exc}") from exc
             nxt = next_models[0]

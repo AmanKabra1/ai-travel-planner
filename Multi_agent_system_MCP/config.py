@@ -68,10 +68,14 @@ _EXCLUDE_KEYWORDS = ["embed", "whisper", "guard", "tts", "vision"]
 
 _log = logging.getLogger(__name__)
 _verified_model: str | None = None
+_live_model_ids: list[str] = []   # cached after first successful API call
 
 
 def _fetch_live_model_ids(api_key: str) -> list[str]:
-    """Return live Groq model IDs via the groq Python client (fallback: raw HTTP)."""
+    """Return live Groq model IDs via the groq Python client (fallback: raw HTTP).
+    Also populates _live_model_ids for use by the retry loop."""
+    global _live_model_ids
+
     # Method 1 — groq client (most reliable, handles auth correctly)
     try:
         from groq import Groq as _Groq
@@ -80,6 +84,7 @@ def _fetch_live_model_ids(api_key: str) -> list[str]:
         ids = [m.id for m in resp.data
                if not any(x in m.id.lower() for x in _EXCLUDE_KEYWORDS)]
         _log.info("Groq client listed %d models: %s", len(ids), ids)
+        _live_model_ids = ids
         return ids
     except Exception as exc:
         _log.warning("groq client model list failed: %s", exc)
@@ -97,11 +102,19 @@ def _fetch_live_model_ids(api_key: str) -> list[str]:
         ids = [m["id"] for m in data.get("data", [])
                if not any(x in m["id"].lower() for x in _EXCLUDE_KEYWORDS)]
         _log.info("HTTP model list: %d models: %s", len(ids), ids)
+        _live_model_ids = ids
         return ids
     except Exception as exc:
         _log.warning("HTTP model list failed: %s", exc)
 
     return []
+
+
+def get_retry_models() -> list[str]:
+    """Return the list of real Groq model IDs to try when the primary fails.
+    Uses the live API-sourced list (populated at startup); falls back to the
+    static GROQ_FALLBACKS if the API call hasn't run yet."""
+    return list(_live_model_ids) if _live_model_ids else list(GROQ_FALLBACKS)
 
 
 def _find_working_groq_model() -> str:
