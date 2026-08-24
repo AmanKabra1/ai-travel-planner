@@ -18,7 +18,7 @@ def list_threads(user_id: str):
     user_id = user_id.strip().lower()
 
     try:
-        with psycopg.connect(DATABASE_URL) as conn:
+        with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
             with conn.cursor() as cur:
                 # Fetch all threads with their latest timestamp
                 cur.execute(

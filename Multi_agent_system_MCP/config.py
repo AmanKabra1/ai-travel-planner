@@ -37,8 +37,8 @@ DATABASE_URL        = os.getenv("DATABASE_URL")
 
 
 GROQ_FALLBACKS = [
-    "llama-3.3-70b-versatile",
     "llama3-70b-8192",
+    "llama-3.3-70b-versatile",
     "llama-3.1-70b-versatile",
     "llama3-8b-8192",
 ]

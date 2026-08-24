@@ -1374,7 +1374,21 @@ if _pending_run:
 # ── Results ───────────────────────────────────────────────────────────────────
 result = st.session_state.get("latest_result")
 
-if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_results", "hotel_results", "transport_results")):
+# When a saved trip is opened but had no content (e.g. a failed previous run),
+# show a friendly message instead of a blank page.
+if result is not None and not any(
+    result.get(k) for k in (
+        "supervisor_reasoning", "flight_results", "hotel_results",
+        "transport_results", "itinerary", "final_response",
+    )
+):
+    st.info(
+        "⚠️ This trip didn't complete — it may have failed during planning. "
+        "Fill in the details below and click **Create My Travel Plan** to try again.",
+        icon=None,
+    )
+
+if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_results", "hotel_results", "transport_results", "itinerary", "final_response")):
     st.divider()
 
     _render_pipeline(result)
