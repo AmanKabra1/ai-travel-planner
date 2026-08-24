@@ -16,8 +16,10 @@ class TravelState(TypedDict, total=False):
     hotel_results: str
     transport_results: str
     weather_results: str
+    nearby_results: str
     budget_results: str
     itinerary: str
+    itinerary_json: str
 
     approval_request: str
     human_feedback: str

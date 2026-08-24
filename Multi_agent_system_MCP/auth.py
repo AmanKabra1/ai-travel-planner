@@ -1,10 +1,12 @@
-"""Auth module — hashed passwords + persistent session tokens in PostgreSQL.
+"""Auth module — hashed passwords + persistent session tokens + shareable plans in PostgreSQL.
 Sessions survive page refreshes; logout explicitly invalidates the token.
 """
 
 import hashlib
+import json
 import logging
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import psycopg
@@ -35,6 +37,14 @@ def setup() -> None:
                 token      TEXT PRIMARY KEY,
                 username   TEXT NOT NULL,
                 expires_at TIMESTAMPTZ NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS shared_plans (
+                share_id   TEXT PRIMARY KEY,
+                username   TEXT NOT NULL,
+                plan_json  TEXT NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
 
@@ -117,3 +127,36 @@ def delete_session(token: str) -> None:
             conn.execute("DELETE FROM sessions WHERE token = %s", (token,))
     except Exception as exc:
         logger.warning("delete_session error: %s", exc)
+
+
+# ── Shareable plans ───────────────────────────────────────────────────────────
+
+def create_share(username: str, plan_state: dict) -> str:
+    """Persist a plan state dict and return a share UUID."""
+    share_id = str(uuid.uuid4())
+    try:
+        plan_json = json.dumps(plan_state, default=str)
+        with psycopg.connect(DATABASE_URL) as conn:
+            conn.execute(
+                "INSERT INTO shared_plans (share_id, username, plan_json) VALUES (%s, %s, %s)",
+                (share_id, username.strip().lower(), plan_json),
+            )
+    except Exception as exc:
+        logger.warning("create_share error: %s", exc)
+    return share_id
+
+
+def load_share(share_id: str) -> dict | None:
+    """Return the plan state dict for a share_id, or None if not found."""
+    if not share_id:
+        return None
+    try:
+        with psycopg.connect(DATABASE_URL) as conn:
+            row = conn.execute(
+                "SELECT plan_json FROM shared_plans WHERE share_id = %s",
+                (share_id,),
+            ).fetchone()
+        return json.loads(row[0]) if row else None
+    except Exception as exc:
+        logger.warning("load_share error: %s", exc)
+        return None

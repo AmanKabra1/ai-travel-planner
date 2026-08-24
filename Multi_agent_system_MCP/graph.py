@@ -9,6 +9,7 @@ from agents import (
     hotel_agent,
     human_approval_agent,
     itinerary_agent,
+    nearby_agent,
     supervisor_agent,
     transport_agent,
     weather_agent,
@@ -21,6 +22,7 @@ AGENT_ORDER = [
     "transport_agent",
     "hotel_agent",
     "weather_agent",
+    "nearby_agent",
     "budget_agent",
     "itinerary_agent",
 ]
@@ -30,6 +32,7 @@ ROUTE_MAP = {
     "transport_agent": "transport_agent",
     "hotel_agent":     "hotel_agent",
     "weather_agent":   "weather_agent",
+    "nearby_agent":    "nearby_agent",
     "budget_agent":    "budget_agent",
     "itinerary_agent": "itinerary_agent",
 }
@@ -69,6 +72,7 @@ def build_graph():
     graph.add_node("transport_agent", transport_agent)
     graph.add_node("hotel_agent", hotel_agent)
     graph.add_node("weather_agent", weather_agent)
+    graph.add_node("nearby_agent", nearby_agent)
     graph.add_node("budget_agent", budget_agent)
     graph.add_node("itinerary_agent", itinerary_agent)
     graph.add_node("human_approval", human_approval_agent)
@@ -80,6 +84,7 @@ def build_graph():
     graph.add_conditional_edges("transport_agent",  route_after_agent("transport_agent"), ROUTE_MAP)
     graph.add_conditional_edges("hotel_agent",      route_after_agent("hotel_agent"),     ROUTE_MAP)
     graph.add_conditional_edges("weather_agent",    route_after_agent("weather_agent"),   ROUTE_MAP)
+    graph.add_conditional_edges("nearby_agent",     route_after_agent("nearby_agent"),    ROUTE_MAP)
     graph.add_conditional_edges("budget_agent",     route_after_agent("budget_agent"),    ROUTE_MAP)
     graph.add_edge("itinerary_agent", "human_approval")
     graph.add_edge("human_approval", "final_response")

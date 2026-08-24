@@ -1,6 +1,7 @@
+import json
 import sys
 import uuid
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -401,6 +402,7 @@ _PIPELINE = [
     ("🚂", "Transport",  "transport_results"),
     ("🏨", "Hotels",     "hotel_results"),
     ("🌤️", "Weather",   "weather_results"),
+    ("📍", "Nearby",     "nearby_results"),
     ("💰", "Budget",     "budget_results"),
     ("📋", "Itinerary",  "itinerary"),
     ("✍️", "Your Review","approved"),
@@ -413,6 +415,7 @@ _NODE_LABELS = {
     "transport_agent":  "🚂  Finding trains & buses…",
     "hotel_agent":      "🏨  Finding the best accommodation…",
     "weather_agent":    "🌤️  Checking destination weather…",
+    "nearby_agent":     "📍  Discovering nearby attractions…",
     "budget_agent":     "💰  Calculating costs & budget…",
     "itinerary_agent":  "📋  Crafting your day-by-day itinerary…",
     "human_approval":   "✍️  Ready for your review…",
@@ -480,6 +483,7 @@ def _build_markdown_export(state: dict) -> str:
         ("Trains & Buses",       "transport_results"),
         ("Accommodation",        "hotel_results"),
         ("Weather & Climate",    "weather_results"),
+        ("Nearby Attractions",   "nearby_results"),
         ("Budget Breakdown",     "budget_results"),
         ("Day-by-Day Itinerary", "itinerary"),
         ("Your Complete Travel Plan", "final_response"),
@@ -491,6 +495,176 @@ def _build_markdown_export(state: dict) -> str:
     return "\n".join(lines)
 
 
+def _render_structured_itinerary(itin_json: str) -> None:
+    """Render structured itinerary JSON as rich Streamlit UI."""
+    try:
+        data = json.loads(itin_json)
+    except (json.JSONDecodeError, TypeError):
+        return
+
+    # ── Trip summary card ──
+    ts = data.get("trip_summary", {})
+    if ts:
+        cols = st.columns(4)
+        cols[0].metric("From → To",  f"{ts.get('from','?')} → {ts.get('to','?')}")
+        cols[1].metric("Dates",      f"{ts.get('start_date','?')} – {ts.get('end_date','?')}")
+        cols[2].metric("Travellers", ts.get("members", "?"))
+        cols[3].metric("Est. Total", ts.get("total_budget_estimate", "?"))
+
+    # ── Day-by-day ──
+    days = data.get("days", [])
+    if days:
+        st.markdown("### 🗓 Day-by-Day Plan")
+        for day in days:
+            label = f"Day {day.get('day','')}  {day.get('date','')}  —  ~{day.get('estimated_day_cost','?')}"
+            with st.expander(label, expanded=(day.get("day") == 1)):
+                meals = day.get("meals", {})
+                if any(meals.values()):
+                    st.markdown(
+                        f"🍳 **Breakfast:** {meals.get('breakfast','—')} &nbsp;&nbsp;"
+                        f"🍜 **Lunch:** {meals.get('lunch','—')} &nbsp;&nbsp;"
+                        f"🍽️ **Dinner:** {meals.get('dinner','—')}"
+                    )
+                acts = day.get("activities", [])
+                if acts:
+                    rows = ["| Time | Place | Duration | Entry Fee | Notes |",
+                            "|------|-------|----------|-----------|-------|"]
+                    for a in acts:
+                        rows.append(
+                            f"| {a.get('time','—')} | **{a.get('place','—')}** "
+                            f"| {a.get('duration_hrs','—')} hr | {a.get('entry_fee','—')} "
+                            f"| {a.get('notes','—')} |"
+                        )
+                    st.markdown("\n".join(rows))
+
+    # ── Hotels ──
+    hotels = data.get("hotels", [])
+    if hotels:
+        st.markdown("### 🏨 Recommended Hotels")
+        for h in hotels:
+            tag = {"budget": "💚 Budget", "best_value": "⭐ Best Value", "premium": "💎 Premium"}.get(h.get("type",""), "🏨")
+            link = f" — [Book]({h['booking_link']})" if h.get("booking_link") else ""
+            st.markdown(
+                f"**{tag} — {h.get('name','?')}** {link}  \n"
+                f"₹/$ {h.get('price_per_night','?')}/night · ⭐ {h.get('rating','?')} · {h.get('notes','')}"
+            )
+
+    # ── Transport ──
+    transport = data.get("transport", {})
+    to_dest = transport.get("to_destination", [])
+    if to_dest:
+        st.markdown("### 🚀 Getting There")
+        for t in to_dest:
+            link = f" — [Book]({t['booking_link']})" if t.get("booking_link") else ""
+            st.markdown(f"**{t.get('mode','?')}** {link} · {t.get('duration','?')} · ~{t.get('cost_per_person','?')} per person")
+
+    # ── Budget breakdown ──
+    bb = data.get("budget_breakdown", {})
+    if bb:
+        st.markdown("### 💰 Budget Breakdown")
+        items = [
+            ("✈️ Transport (to/from)", bb.get("transport_total","")),
+            ("🏨 Accommodation",       bb.get("hotel_total","")),
+            ("🍜 Food & Dining",       bb.get("food_total","")),
+            ("🎫 Activities & Entry",  bb.get("activities_total","")),
+            ("🚌 Local Transport",     bb.get("local_transport_total","")),
+            ("🛡️ Buffer (10%)",       bb.get("buffer_10pct","")),
+        ]
+        for label, val in items:
+            if val:
+                col_l, col_r = st.columns([4, 2])
+                col_l.markdown(label)
+                col_r.markdown(f"**{val}**")
+        st.divider()
+        total_col, pp_col = st.columns(2)
+        total_col.metric("Grand Total",    bb.get("grand_total","—"))
+        pp_col.metric("Per Person",         bb.get("cost_per_person","—"))
+
+    # ── Food & Markets ──
+    food = data.get("local_food", [])
+    if food:
+        st.markdown("### 🍜 Local Food Highlights")
+        for f in food:
+            st.markdown(f"**{f.get('dish','?')}** — {f.get('where','?')} · {f.get('price_range','')}")
+
+    markets = data.get("local_markets", [])
+    if markets:
+        st.markdown("### 🛍️ Local Markets")
+        for m in markets:
+            st.markdown(f"**{m.get('name','?')}** — {m.get('known_for','?')} · Best time: {m.get('best_time','?')}")
+
+    # ── Nearby attractions ──
+    attractions = data.get("nearby_attractions", [])
+    if attractions:
+        st.markdown("### 📍 Nearby Attractions")
+        for a in attractions:
+            st.markdown(
+                f"**{a.get('name','?')}** ({a.get('category','')}) — "
+                f"{a.get('distance_km','?')} km away · {a.get('duration_hrs','?')} hr · Entry: {a.get('entry_fee','?')}"
+            )
+
+
+def _build_print_html(state: dict) -> str:
+    """Generate a print-ready HTML document for PDF export."""
+    dest        = (state.get("trip_constraints") or {}).get("destination", "Trip")
+    s_date      = (state.get("trip_constraints") or {}).get("start_date", "")
+    e_date      = (state.get("trip_constraints") or {}).get("end_date", "")
+    members     = (state.get("trip_constraints") or {}).get("members", "")
+    query       = state.get("user_query", "")
+    final       = state.get("final_response", "") or state.get("itinerary", "")
+    flights     = state.get("flight_results", "")
+    transport   = state.get("transport_results", "")
+    hotels      = state.get("hotel_results", "")
+    weather     = state.get("weather_results", "")
+    nearby      = state.get("nearby_results", "")
+    budget      = state.get("budget_results", "")
+    now         = datetime.now().strftime("%d %b %Y")
+
+    def md_section(title, content):
+        if not content:
+            return ""
+        paras = "".join(f"<p>{line}</p>" for line in content.split("\n") if line.strip())
+        return f"<div class='section'><h2>{title}</h2>{paras}</div>"
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Travel Plan — {dest}</title>
+<style>
+  body {{ font-family: 'Georgia', serif; max-width: 860px; margin: 40px auto; color: #1a202c; line-height: 1.7; }}
+  h1 {{ color: #0369a1; border-bottom: 3px solid #0ea5e9; padding-bottom: 8px; }}
+  h2 {{ color: #0369a1; margin-top: 28px; border-left: 4px solid #0ea5e9; padding-left: 12px; }}
+  .meta {{ background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 16px 20px; margin: 20px 0; }}
+  .meta span {{ margin-right: 24px; font-size: 0.95rem; color: #0369a1; }}
+  .section {{ margin-bottom: 28px; }}
+  .section p {{ margin: 4px 0; }}
+  .footer {{ margin-top: 40px; color: #94a3b8; font-size: 0.82rem; border-top: 1px solid #e2e8f0; padding-top: 12px; }}
+  @media print {{ body {{ margin: 20px; }} }}
+</style>
+</head>
+<body>
+<h1>✈️ Travel Plan — {dest}</h1>
+<div class="meta">
+  <span>📅 {s_date} – {e_date}</span>
+  <span>👥 {members} traveller(s)</span>
+  <span>🗓 Generated: {now}</span>
+</div>
+
+{md_section("Your Request", query)}
+{md_section("Complete Itinerary", final)}
+{md_section("Flights", flights)}
+{md_section("Trains &amp; Buses", transport)}
+{md_section("Hotels", hotels)}
+{md_section("Weather", weather)}
+{md_section("Nearby Attractions", nearby)}
+{md_section("Budget Breakdown", budget)}
+
+<div class="footer">Wandr — AI Travel Planner &nbsp;|&nbsp; Open in browser and press Ctrl+P / Cmd+P to save as PDF</div>
+</body>
+</html>"""
+
+
 def _merge(base: dict, update: dict) -> dict:
     for k, v in update.items():
         if k == "messages" and isinstance(v, list):
@@ -499,6 +673,42 @@ def _merge(base: dict, update: dict) -> dict:
         elif v is not None:
             base[k] = v
     return base
+
+
+# ── Shared plan public view — ?share=<uuid> bypasses auth gate ────────────────
+_share_param = st.query_params.get("share", "")
+if _share_param and not st.session_state.get("authenticated"):
+    _shared = auth.load_share(_share_param)
+    if _shared:
+        st.markdown(
+            "<style>[data-testid='stSidebar']{display:none!important}</style>",
+            unsafe_allow_html=True,
+        )
+        _sdest = (_shared.get("trip_constraints") or {}).get("destination", "Travel Plan")
+        st.markdown(
+            f'<div class="final-header">'
+            f'<div class="final-title">🌍 Shared Travel Plan — {_sdest}</div>'
+            f'<div class="final-sub">Created with Wandr AI Travel Planner &amp; shared with you</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        if _shared.get("final_response"):
+            st.markdown(_shared["final_response"])
+        elif _shared.get("itinerary"):
+            st.markdown(_shared["itinerary"])
+        if _shared.get("nearby_results"):
+            st.divider()
+            st.markdown(_shared["nearby_results"])
+        st.divider()
+        st.markdown(
+            "<div style='text-align:center;color:#334155;font-size:0.82rem'>"
+            "Plan your own trip at <b style='color:#0ea5e9'>Wandr</b> — AI Travel Planner</div>",
+            unsafe_allow_html=True,
+        )
+        st.stop()
+    else:
+        st.warning("This share link is invalid or has expired.")
+        st.query_params.clear()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -773,14 +983,59 @@ with col_to:
     )
 
 
+# ── Dates · Members · Transport ───────────────────────────────────────────────
+col_s, col_e, col_m, col_tp = st.columns([3, 3, 2, 3])
+with col_s:
+    st.markdown('<div class="route-label">📅 Departure Date</div>', unsafe_allow_html=True)
+    start_date = st.date_input(
+        "start_date", key="start_date",
+        value=date.today() + timedelta(days=7),
+        label_visibility="collapsed", disabled=_is_running,
+    )
+with col_e:
+    st.markdown('<div class="route-label">📅 Return Date</div>', unsafe_allow_html=True)
+    end_date = st.date_input(
+        "end_date", key="end_date",
+        value=date.today() + timedelta(days=14),
+        min_value=start_date,
+        label_visibility="collapsed", disabled=_is_running,
+    )
+with col_m:
+    st.markdown('<div class="route-label">👥 Travellers</div>', unsafe_allow_html=True)
+    members = st.number_input(
+        "members", key="n_members",
+        min_value=1, max_value=20, value=2,
+        label_visibility="collapsed", disabled=_is_running,
+    )
+with col_tp:
+    st.markdown('<div class="route-label">🚀 Main Transport</div>', unsafe_allow_html=True)
+    transport_pref = st.selectbox(
+        "transport_pref", key="transport_pref",
+        options=["Mixed (Auto)", "Flight", "Train", "Bus", "Car / Self-drive"],
+        label_visibility="collapsed", disabled=_is_running,
+    )
+
+# Interests
+st.markdown('<div class="route-label" style="margin-top:0.5rem">🎯 Interests (optional)</div>', unsafe_allow_html=True)
+interests = st.multiselect(
+    "interests", key="interests",
+    options=["Temples & Heritage", "Nature & Outdoors", "Food & Street Food",
+             "Shopping & Markets", "Adventure Sports", "Art & Museums",
+             "Beach & Water", "Wellness & Spa", "Nightlife & Entertainment", "Photography"],
+    placeholder="Select your travel interests…",
+    label_visibility="collapsed",
+    disabled=_is_running,
+)
+
+
 # ── Travel details textarea ───────────────────────────────────────────────────
 query = st.text_area(
     "Travel details",
     placeholder=(
-        "Duration, budget, number of travellers, hotel preference, must-do activities…\n"
-        "Example: 7 days for 2 people, budget ₹1.5 lakh per person, love street food and temples, prefer mid-range hotels."
+        "Budget, hotel preference, must-do activities, dietary needs…\n"
+        "Example: Budget ₹1.5 lakh per person, love street food, prefer mid-range hotels, no overnight trains."
     ),
-    height=100,
+    height=90,
     label_visibility="collapsed",
     disabled=_is_running,
 )
@@ -821,26 +1076,44 @@ with col_hint:
 
 # ── Stage 1: Button clicked → save inputs, set running, rerun ─────────────────
 if run and not _is_running:
-    _origin = st.session_state.get("from_input", "").strip()
-    _dest   = st.session_state.get("to_input",   "").strip()
+    _origin    = st.session_state.get("from_input",    "").strip()
+    _dest      = st.session_state.get("to_input",      "").strip()
+    _s_date    = st.session_state.get("start_date",    date.today() + timedelta(days=7))
+    _e_date    = st.session_state.get("end_date",      date.today() + timedelta(days=14))
+    _members   = int(st.session_state.get("n_members", 2))
+    _tpref     = st.session_state.get("transport_pref","Mixed (Auto)")
+    _interests = st.session_state.get("interests",     [])
+    _duration  = (_e_date - _s_date).days
 
     if not _dest and not query.strip():
-        st.warning("Please enter a destination or describe your trip above.")
+        st.warning("Please enter a destination (To field) or describe your trip.")
     else:
-        route_prefix = ""
+        parts = []
         if _origin and _dest:
-            route_prefix = f"Travelling from {_origin} to {_dest}. "
+            parts.append(f"Travelling from {_origin} to {_dest}")
         elif _dest:
-            route_prefix = f"Destination: {_dest}. "
+            parts.append(f"Destination: {_dest}")
         elif _origin:
-            route_prefix = f"Departing from {_origin}. "
+            parts.append(f"Departing from {_origin}")
+        parts.append(f"from {_s_date} to {_e_date} ({_duration} days)")
+        parts.append(f"for {_members} traveller{'s' if _members > 1 else ''}")
+        if _tpref != "Mixed (Auto)":
+            parts.append(f"preferring {_tpref} for main travel")
+        if _interests:
+            parts.append(f"interests: {', '.join(_interests)}")
 
-        enriched_query = (route_prefix + query).strip()
+        enriched_query = "; ".join(parts) + ". " + query.strip()
 
         st.session_state["pending_run"] = {
             "enriched_query": enriched_query,
             "origin":         _origin,
             "dest":           _dest,
+            "start_date":     str(_s_date),
+            "end_date":       str(_e_date),
+            "members":        _members,
+            "transport_mode": _tpref.split()[0].lower(),
+            "interests":      _interests,
+            "budget":         query.strip(),
         }
         st.session_state["is_running"] = True
         st.rerun()
@@ -849,15 +1122,27 @@ if run and not _is_running:
 # ── Stage 2: Pending run exists → execute agents ──────────────────────────────
 if _pending_run:
     enriched_query = _pending_run["enriched_query"]
-    _origin        = _pending_run["origin"]
-    _dest          = _pending_run["dest"]
+    _origin        = _pending_run.get("origin", "")
+    _dest          = _pending_run.get("dest", "")
+
+    _trip_constraints = {
+        "origin":         _origin,
+        "destination":    _dest,
+        "start_date":     _pending_run.get("start_date", ""),
+        "end_date":       _pending_run.get("end_date", ""),
+        "members":        _pending_run.get("members", 2),
+        "transport_mode": _pending_run.get("transport_mode", "mixed"),
+        "interests":      _pending_run.get("interests", []),
+        "budget":         _pending_run.get("budget", ""),
+    }
 
     state: dict = {
         "supervisor_reasoning": "", "selected_agents": [],
-        "trip_constraints":     {"origin": _origin, "destination": _dest} if (_origin or _dest) else {},
+        "trip_constraints":     _trip_constraints,
         "flight_results": "",   "transport_results": "",
         "hotel_results":  "",   "weather_results":   "",
-        "budget_results": "",   "itinerary":         "",
+        "nearby_results": "",   "budget_results":    "",
+        "itinerary":      "",   "itinerary_json":    "",
         "final_response": "",   "approved": None,
         "llm_calls":      0,
     }
@@ -867,9 +1152,11 @@ if _pending_run:
         "messages":          [HumanMessage(content=enriched_query)],
         "user_id":           username,
         "user_query":        enriched_query,
+        "trip_constraints":  _trip_constraints,
         "flight_results":    "", "transport_results": "",
         "hotel_results":     "", "weather_results":   "",
-        "budget_results":    "", "itinerary":         "",
+        "nearby_results":    "", "budget_results":    "",
+        "itinerary":         "", "itinerary_json":    "",
         "final_response":    "", "llm_calls":         0,
     }
 
@@ -915,7 +1202,7 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_result
     _render_pipeline(result)
 
     searches_done = sum(
-        1 for k in ("flight_results", "transport_results", "hotel_results", "weather_results", "budget_results")
+        1 for k in ("flight_results", "transport_results", "hotel_results", "weather_results", "nearby_results", "budget_results")
         if result.get(k)
     )
     pending       = st.session_state.get("waiting_for_approval")
@@ -930,8 +1217,8 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_result
     m3.metric("Duration",      duration)
     m4.metric("Status",        status_label)
 
-    tab_fl, tab_tr, tab_ht, tab_wx, tab_bud, tab_itin = st.tabs(
-        ["✈️  Flights", "🚂  Trains & Buses", "🏨  Hotels", "🌤️  Weather", "💰  Budget", "📋  Itinerary"]
+    tab_fl, tab_tr, tab_ht, tab_wx, tab_nb, tab_bud, tab_itin = st.tabs(
+        ["✈️  Flights", "🚂  Trains & Buses", "🏨  Hotels", "🌤️  Weather", "📍  Nearby", "💰  Budget", "📋  Itinerary"]
     )
     with tab_fl:
         content = result.get("flight_results")
@@ -967,6 +1254,15 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_result
         else:
             st.markdown(
                 '<div class="tip-card"><div class="tip-card-text">Weather data will appear here once the destination is confirmed.</div></div>',
+                unsafe_allow_html=True,
+            )
+    with tab_nb:
+        content = result.get("nearby_results")
+        if content:
+            st.markdown(content)
+        else:
+            st.markdown(
+                '<div class="tip-card"><div class="tip-card-text">Nearby attractions (temples, waterfalls, parks, local food) will appear here once the destination is confirmed.</div></div>',
                 unsafe_allow_html=True,
             )
     with tab_bud:
@@ -1041,9 +1337,41 @@ if final and final.get("final_response"):
 
     st.markdown(final["final_response"])
 
-    st.download_button(
-        label="📥  Download as Markdown",
-        data=_build_markdown_export(final).encode("utf-8"),
-        file_name=f"travel_plan_{dest_label.replace(' ', '_').lower()}_{st.session_state['thread_id'][-6:]}.md",
-        mime="text/markdown",
-    )
+    col_dl, col_pdf, col_share = st.columns([2, 2, 2])
+
+    with col_dl:
+        st.download_button(
+            label="📥  Download (.md)",
+            data=_build_markdown_export(final).encode("utf-8"),
+            file_name=f"travel_plan_{dest_label.replace(' ', '_').lower()}_{st.session_state['thread_id'][-6:]}.md",
+            mime="text/markdown",
+            use_container_width=True,
+        )
+
+    with col_pdf:
+        st.download_button(
+            label="🖨️  Export as HTML",
+            data=_build_print_html(final).encode("utf-8"),
+            file_name=f"travel_plan_{dest_label.replace(' ', '_').lower()}.html",
+            mime="text/html",
+            use_container_width=True,
+        )
+
+    with col_share:
+        if st.button("🔗  Get Share Link", use_container_width=True):
+            _share_state = {k: final.get(k, "") for k in (
+                "user_query", "trip_constraints", "flight_results", "transport_results",
+                "hotel_results", "weather_results", "nearby_results", "budget_results",
+                "itinerary", "itinerary_json", "final_response",
+            )}
+            _sid = auth.create_share(username, _share_state)
+            _share_url = f"?share={_sid}"
+            st.session_state["share_url"] = _share_url
+            st.session_state["share_id"]  = _sid
+
+    if st.session_state.get("share_url"):
+        st.success(
+            f"🔗 **Share link created!** Anyone with this link can view your plan (no login needed):\n\n"
+            f"`{st.session_state['share_url']}`\n\n"
+            f"*(Copy the URL above and share it — or append it to your Wandr domain)*"
+        )
