@@ -2,9 +2,10 @@
 Nearby attractions discovery — all free, no API key required.
 
 Sources:
-  - Nominatim (OSM): city name → lat/lon
-  - Overpass API (OSM): POIs within radius
+  - Nominatim (OSM): city/village/hamlet → lat/lon, full address context
+  - Overpass API (OSM): POIs within radius, auto-expands if sparse
   - Wikivoyage MediaWiki API: local food, culture, shopping tips
+    (falls back to parent region if small place has no page)
 """
 
 import logging
@@ -21,19 +22,41 @@ _TIMEOUT = 20
 
 # ── Geocoding ─────────────────────────────────────────────────────────────────
 
-def geocode_city(city: str) -> tuple[float, float] | None:
-    """Return (lat, lon) for a city name using Nominatim, or None on failure."""
+def geocode_city(city: str) -> tuple[float, float, dict] | None:
+    """Return (lat, lon, meta) for any settlement — city, town, village, hamlet.
+
+    meta dict includes: display_name, region, country, place_type
+    Returns None on failure.
+    """
     try:
         resp = requests.get(
             "https://nominatim.openstreetmap.org/search",
-            params={"q": city, "format": "json", "limit": 1},
+            params={
+                "q":              city,
+                "format":         "jsonv2",
+                "limit":          1,
+                "addressdetails": 1,
+            },
             headers=_HEADERS,
             timeout=_TIMEOUT,
         )
         resp.raise_for_status()
         data = resp.json()
         if data:
-            return float(data[0]["lat"]), float(data[0]["lon"])
+            hit     = data[0]
+            addr    = hit.get("address", {})
+            region  = (
+                addr.get("state") or addr.get("county") or
+                addr.get("region") or addr.get("province") or ""
+            )
+            country = addr.get("country", "")
+            meta = {
+                "display_name": hit.get("display_name", city),
+                "region":       region,
+                "country":      country,
+                "place_type":   hit.get("type", ""),
+            }
+            return float(hit["lat"]), float(hit["lon"]), meta
     except Exception as exc:
         logger.warning("Nominatim geocode failed for '%s': %s", city, exc)
     return None
@@ -52,31 +75,36 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 # ── Overpass API ──────────────────────────────────────────────────────────────
 
 _CATEGORY_MAP = {
-    "attraction":      "Tourist Attraction",
-    "viewpoint":       "Viewpoint",
-    "museum":          "Museum",
-    "place_of_worship":"Temple / Shrine",
-    "waterfall":       "Waterfall",
-    "peak":            "Mountain / Peak",
-    "marketplace":     "Market",
-    "park":            "Park / Garden",
-    "castle":          "Castle / Fort",
-    "monument":        "Monument",
-    "ruins":           "Historic Ruins",
-    "beach":           "Beach",
-    "cave":            "Cave",
-    "hot_spring":      "Hot Spring",
-    "theme_park":      "Theme Park",
-    "zoo":             "Zoo / Wildlife",
-    "art_gallery":     "Art Gallery",
+    "attraction":       "Tourist Attraction",
+    "viewpoint":        "Viewpoint",
+    "museum":           "Museum",
+    "place_of_worship": "Temple / Shrine",
+    "waterfall":        "Waterfall",
+    "peak":             "Mountain / Peak",
+    "marketplace":      "Market",
+    "park":             "Park / Garden",
+    "castle":           "Castle / Fort",
+    "monument":         "Monument",
+    "ruins":            "Historic Ruins",
+    "beach":            "Beach",
+    "cave_entrance":    "Cave",
+    "hot_spring":       "Hot Spring",
+    "theme_park":       "Theme Park",
+    "zoo":              "Zoo / Wildlife",
+    "art_gallery":      "Art Gallery",
+    "archaeological_site": "Archaeological Site",
+    "historic":         "Historic Site",
+    "nature_reserve":   "Nature Reserve",
+    "dam":              "Dam / Reservoir",
+    "river":            "River / Lake",
+    "forest":           "Forest",
+    "national_park":    "National Park",
 }
 
 
-def overpass_nearby(lat: float, lon: float, radius_m: int = 100_000) -> list[dict]:
-    """Return POIs within radius_m metres of (lat, lon), sorted by distance."""
-    r = radius_m
+def _run_overpass(lat: float, lon: float, r: int) -> list:
     query = f"""
-[out:json][timeout:40];
+[out:json][timeout:45];
 (
   node(around:{r},{lat},{lon})["tourism"="attraction"]["name"];
   node(around:{r},{lat},{lon})["tourism"="viewpoint"]["name"];
@@ -90,25 +118,52 @@ def overpass_nearby(lat: float, lon: float, radius_m: int = 100_000) -> list[dic
   node(around:{r},{lat},{lon})["natural"="beach"]["name"];
   node(around:{r},{lat},{lon})["natural"="cave_entrance"]["name"];
   node(around:{r},{lat},{lon})["natural"="hot_spring"]["name"];
+  node(around:{r},{lat},{lon})["natural"="wood"]["name"];
   node(around:{r},{lat},{lon})["amenity"="marketplace"]["name"];
   node(around:{r},{lat},{lon})["leisure"="park"]["name"];
-  node(around:{r},{lat},{lon})["historic"~"castle|monument|ruins"]["name"];
+  node(around:{r},{lat},{lon})["leisure"="nature_reserve"]["name"];
+  node(around:{r},{lat},{lon})["historic"~"castle|monument|ruins|archaeological_site"]["name"];
+  node(around:{r},{lat},{lon})["waterway"="dam"]["name"];
+  way(around:{r},{lat},{lon})["tourism"="attraction"]["name"];
+  way(around:{r},{lat},{lon})["historic"~"castle|monument|ruins|archaeological_site"]["name"];
+  way(around:{r},{lat},{lon})["leisure"="nature_reserve"]["name"];
+  way(around:{r},{lat},{lon})["boundary"="national_park"]["name"];
 );
-out body;
+out center;
 """
-    try:
-        resp = requests.post(
-            "https://overpass-api.de/api/interpreter",
-            data={"data": query},
-            headers=_HEADERS,
-            timeout=40,
-        )
-        resp.raise_for_status()
-        elements = resp.json().get("elements", [])
-    except Exception as exc:
-        logger.warning("Overpass query failed: %s", exc)
-        return []
+    resp = requests.post(
+        "https://overpass-api.de/api/interpreter",
+        data={"data": query},
+        headers=_HEADERS,
+        timeout=50,
+    )
+    resp.raise_for_status()
+    return resp.json().get("elements", [])
 
+
+def overpass_nearby(lat: float, lon: float, radius_m: int = 100_000) -> list[dict]:
+    """Return POIs within radius_m metres, auto-expanding if results are sparse.
+
+    For small/remote places with few POIs, expands the search to 150 km so the
+    output is always meaningful.
+    """
+    pois = _parse_overpass(_run_overpass(lat, lon, radius_m), lat, lon)
+
+    # If very sparse (small/remote place), expand radius once
+    if len(pois) < 8 and radius_m < 150_000:
+        logger.info("Sparse POIs (%d) — expanding to 150 km", len(pois))
+        try:
+            more = _parse_overpass(_run_overpass(lat, lon, 150_000), lat, lon)
+            if len(more) > len(pois):
+                pois = more
+        except Exception:
+            pass
+
+    pois.sort(key=lambda p: p["distance_km"])
+    return pois
+
+
+def _parse_overpass(elements: list, center_lat: float, center_lon: float) -> list[dict]:
     pois: list[dict] = []
     seen_names: set[str] = set()
 
@@ -122,13 +177,20 @@ out body;
         raw_cat = (
             tags.get("tourism") or tags.get("natural") or
             tags.get("historic") or tags.get("amenity") or
-            tags.get("leisure") or "attraction"
+            tags.get("leisure") or tags.get("waterway") or "attraction"
         )
         category = _CATEGORY_MAP.get(raw_cat, raw_cat.replace("_", " ").title())
 
-        e_lat = float(e.get("lat", lat))
-        e_lon = float(e.get("lon", lon))
-        dist  = round(_haversine_km(lat, lon, e_lat, e_lon), 1)
+        # Ways have a "center" key; nodes have lat/lon directly
+        if e.get("type") == "way":
+            c = e.get("center", {})
+            e_lat = float(c.get("lat", center_lat))
+            e_lon = float(c.get("lon", center_lon))
+        else:
+            e_lat = float(e.get("lat", center_lat))
+            e_lon = float(e.get("lon", center_lon))
+
+        dist = round(_haversine_km(center_lat, center_lon, e_lat, e_lon), 1)
 
         pois.append({
             "name":        name,
@@ -142,23 +204,23 @@ out body;
             "wikidata":    tags.get("wikidata", ""),
         })
 
-    pois.sort(key=lambda p: p["distance_km"])
     return pois
 
 
 def bucket_pois(pois: list[dict]) -> dict[str, list[dict]]:
     """Group POIs into distance buckets."""
     return {
-        "within_10km":  [p for p in pois if p["distance_km"] <= 10],
-        "10_to_30km":   [p for p in pois if 10 < p["distance_km"] <= 30],
-        "30_to_50km":   [p for p in pois if 30 < p["distance_km"] <= 50],
-        "50_to_100km":  [p for p in pois if 50 < p["distance_km"] <= 100],
+        "within_10km": [p for p in pois if p["distance_km"] <= 10],
+        "10_to_30km":  [p for p in pois if 10 < p["distance_km"] <= 30],
+        "30_to_50km":  [p for p in pois if 30 < p["distance_km"] <= 50],
+        "50_to_100km": [p for p in pois if 50 < p["distance_km"] <= 100],
     }
 
 
 # ── Wikivoyage ────────────────────────────────────────────────────────────────
 
 _WIKIVOYAGE_SECTIONS = ["eat", "buy", "do", "see", "understand", "drink"]
+_WV_BASE = "https://en.wikivoyage.org/w/api.php"
 
 
 def _clean_wikitext(text: str) -> str:
@@ -170,20 +232,19 @@ def _clean_wikitext(text: str) -> str:
     return text.strip()
 
 
-def wikivoyage_local_tips(city: str) -> dict[str, str]:
-    """Fetch Eat / Buy / Culture sections from Wikivoyage. Returns {section: text}."""
-    base = "https://en.wikivoyage.org/w/api.php"
+def _fetch_wikivoyage(page_title: str) -> dict[str, str]:
+    """Fetch Eat / Buy / Culture sections for a Wikivoyage page title."""
     try:
         r = requests.get(
-            base,
-            params={"action": "parse", "page": city,
+            _WV_BASE,
+            params={"action": "parse", "page": page_title,
                     "prop": "sections", "format": "json"},
             headers=_HEADERS, timeout=_TIMEOUT,
         )
         r.raise_for_status()
         sections = r.json().get("parse", {}).get("sections", [])
     except Exception as exc:
-        logger.warning("Wikivoyage section list failed for '%s': %s", city, exc)
+        logger.debug("Wikivoyage sections failed for '%s': %s", page_title, exc)
         return {}
 
     matched: dict[str, str] = {}
@@ -194,8 +255,8 @@ def wikivoyage_local_tips(city: str) -> dict[str, str]:
         if key and key not in matched:
             try:
                 r2 = requests.get(
-                    base,
-                    params={"action": "parse", "page": city,
+                    _WV_BASE,
+                    params={"action": "parse", "page": page_title,
                             "prop": "wikitext", "section": idx, "format": "json"},
                     headers=_HEADERS, timeout=_TIMEOUT,
                 )
@@ -208,6 +269,34 @@ def wikivoyage_local_tips(city: str) -> dict[str, str]:
             break
 
     return matched
+
+
+def wikivoyage_local_tips(city: str, region: str = "", country: str = "") -> dict[str, str]:
+    """Fetch local tips from Wikivoyage, falling back to region/country if city page missing.
+
+    For small places that don't have their own Wikivoyage article, tries the parent
+    region or country instead so the output is always useful.
+    """
+    # Try exact city name first
+    tips = _fetch_wikivoyage(city)
+    if tips:
+        return tips
+
+    # Fallback 1 — region (state / county / province)
+    if region:
+        logger.info("Wikivoyage: '%s' not found, trying region '%s'", city, region)
+        tips = _fetch_wikivoyage(region)
+        if tips:
+            return tips
+
+    # Fallback 2 — country
+    if country:
+        logger.info("Wikivoyage: region not found, trying country '%s'", country)
+        tips = _fetch_wikivoyage(country)
+        if tips:
+            return tips
+
+    return {}
 
 
 def format_pois_text(pois: list[dict], max_n: int = 15) -> str:

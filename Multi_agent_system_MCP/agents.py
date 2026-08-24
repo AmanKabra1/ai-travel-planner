@@ -357,77 +357,120 @@ def nearby_agent(state: TravelState):
         }
 
     # ── Geocode ──────────────────────────────────────────────────────────────
-    coords = geocode_city(destination)
-    if not coords:
+    geo = geocode_city(destination)
+    if not geo:
         return {
             "nearby_results": f"Could not locate {destination} on the map — nearby search skipped.",
             "messages":       [AIMessage(content="Nearby agent: geocoding failed.")],
         }
-    lat, lon = coords
-    logger.info("Nearby agent — coords: %.4f, %.4f", lat, lon)
+    lat, lon, geo_meta = geo
+    region  = geo_meta.get("region", "")
+    country = geo_meta.get("country", "")
+    place_type = geo_meta.get("place_type", "")
+    logger.info("Nearby agent — '%s' (%s) coords: %.4f, %.4f", destination, place_type, lat, lon)
 
-    # ── Overpass POIs (100 km radius) ────────────────────────────────────────
+    # ── Overpass POIs (auto-expands for sparse/small places) ─────────────────
     pois    = overpass_nearby(lat, lon, radius_m=100_000)
     buckets = bucket_pois(pois)
     logger.info("Nearby agent — %d POIs found", len(pois))
 
-    # ── Wikivoyage local culture ──────────────────────────────────────────────
-    wiki_tips = wikivoyage_local_tips(destination)
+    # ── Wikivoyage local culture (falls back to region → country) ────────────
+    wiki_tips = wikivoyage_local_tips(destination, region=region, country=country)
 
-    # ── Tavily for hidden gems ────────────────────────────────────────────────
-    try:
-        hidden_raw  = asyncio.run(tavily_search(
-            f"hidden gem local attractions near {destination} worth visiting"
-        ))
-        hidden_text = _extract_tavily_with_urls(hidden_raw)[:2000]
-    except Exception as exc:
-        logger.warning("Nearby Tavily search failed: %s", exc)
-        hidden_text = ""
+    # ── Tavily searches — broader for small/unknown places ───────────────────
+    tavily_parts: list[str] = []
+
+    def _tsearch(q: str) -> str:
+        try:
+            raw = asyncio.run(tavily_search(q))
+            return _extract_tavily_with_urls(raw)[:1800]
+        except Exception as exc:
+            logger.warning("Nearby Tavily '%s' failed: %s", q[:50], exc)
+            return ""
+
+    if len(pois) < 10:
+        # Small / obscure place — run multiple targeted searches
+        tavily_parts.append(_tsearch(f"top tourist places to visit near {destination} {region} {country}"))
+        tavily_parts.append(_tsearch(f"famous things to do in {destination} travel guide local attractions"))
+        tavily_parts.append(_tsearch(f"local food specialties street food {destination} {country}"))
+    else:
+        tavily_parts.append(_tsearch(f"hidden gem local attractions near {destination} worth visiting"))
+        tavily_parts.append(_tsearch(f"local food specialties {destination}"))
+
+    hidden_text = "\n\n".join(t for t in tavily_parts if t)
 
     # ── LLM format ────────────────────────────────────────────────────────────
     bucket_summary = "\n\n".join([
-        f"**Within 10 km:**\n{format_pois_text(buckets['within_10km'], 10)}",
-        f"**10 – 30 km away:**\n{format_pois_text(buckets['10_to_30km'], 10)}",
-        f"**30 – 50 km away:**\n{format_pois_text(buckets['30_to_50km'], 10)}",
-        f"**50 – 100 km away:**\n{format_pois_text(buckets['50_to_100km'], 10)}",
+        f"**Within 10 km:**\n{format_pois_text(buckets['within_10km'], 12)}",
+        f"**10 – 30 km away:**\n{format_pois_text(buckets['10_to_30km'], 12)}",
+        f"**30 – 50 km away:**\n{format_pois_text(buckets['30_to_50km'], 12)}",
+        f"**50 – 100 km away:**\n{format_pois_text(buckets['50_to_100km'], 12)}",
     ])
 
     wiki_summary = "\n\n".join(
         f"**{k.title()}:**\n{v[:600]}" for k, v in wiki_tips.items()
-    ) or "No Wikivoyage data available."
+    ) or f"No Wikivoyage page found for {destination} — using web search data below."
 
+    context_note = (
+        f"NOTE: This is a small/lesser-known location in {region}, {country}."
+        if len(pois) < 10 else
+        f"Location: {destination}, {region}, {country}."
+    )
+
+    dest_enc = destination.replace(" ", "+")
     result = _llm_text(
-        "You are a local travel expert who knows the area intimately.",
-        f"""Produce a rich, structured guide to places and experiences near {destination}.
+        "You are a knowledgeable local travel expert. Even for small, obscure, or lesser-known places, "
+        "you produce rich, detailed, accurate guides using whatever data is available.",
+        f"""Produce a detailed, vivid guide to {destination} and its surroundings.
 
-Raw OSM data grouped by distance:
+{context_note}
+
+OSM map data grouped by distance from {destination}:
 {bucket_summary}
 
-Wikivoyage local tips:
+Wikivoyage / regional tips:
 {wiki_summary}
 
-Hidden gems from web search:
-{hidden_text}
+Web search results (may include specific local info for small places):
+{hidden_text[:4000]}
 
-Format as clean Markdown with these sections:
+Format as clean Markdown with these exact sections:
+
 ## 📍 Nearby Attractions by Distance
-For each bucket (≤10 km / 10–30 km / 30–50 km / 50–100 km) list:
-- Best 4–6 places with name, category, distance, why it's worth visiting
-- Add a Google Maps search link like: [View on Map](https://www.google.com/maps/search/{destination.replace(' ', '+')}+{{}})
+
+### ≤ 10 km — Right Here
+List every named place found within 10 km. For each:
+- **Name** (category) — X km · Why it's worth visiting / what it's known for
+- [View on Google Maps](https://www.google.com/maps/search/{dest_enc}+attraction)
+
+### 10 – 30 km
+### 30 – 50 km
+### 50 – 100 km
+
+(If a distance bucket has no OSM data, mention 2–3 places from the web search.)
 
 ## 🍜 Local Food & Specialties
-Top dishes, street food, and where to eat — use the Wikivoyage eat section.
+- Top 5–8 dishes or street foods this region is famous for
+- Where / how to find them (market, roadside stall, specific restaurant if known)
+- Price range
 
 ## 🛍️ Shopping & Markets
-Local markets and what they're famous for — use the Wikivoyage buy section.
+- Local markets, bazaars, or craft centres
+- What they're known for (textiles, spices, handicrafts…)
+- Best time to visit
 
-## 🎭 Culture & Traditions
-What makes this place unique — festivals, customs, local people's way of life.
+## 🎭 Culture, Festivals & Traditions
+- What makes this place and its people unique
+- Any festivals, religious events, or seasonal highlights
+- Local customs travellers should know
 
-## 💎 Hidden Gems
-Underrated spots or experiences that most tourists miss.
+## 💎 Hidden Gems & Local Secrets
+- Spots most tourists never find
+- Offbeat experiences, viewpoints, or local favourites
+- Any insider tips from the web search
 
-Be specific and vivid. Use real names from the data provided.
+Be specific and use real place names from the data. If information is limited for this place,
+draw on what's available for the broader region and clearly say so.
 """,
     )
 
