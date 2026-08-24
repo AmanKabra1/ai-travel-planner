@@ -170,6 +170,19 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus {
     border-color: #0ea5e9 !important;
     box-shadow: 0 0 0 3px rgba(14,165,233,.15) !important;
 }
+/* ── Kill ALL red borders (Streamlit BaseWeb validation) ── */
+[data-baseweb="input"] > div,
+[data-baseweb="input"] > div:first-child { border-color: #1a3a6b !important; }
+[data-baseweb="input"]:focus-within > div,
+[data-baseweb="input"]:focus-within > div:first-child {
+    border-color: #0ea5e9 !important;
+    box-shadow: 0 0 0 3px rgba(14,165,233,.15) !important;
+}
+[data-testid="stTextInput"] [data-baseweb="input"] > div { border-color: #1a3a6b !important; }
+[data-testid="stTextInput"] [data-baseweb="input"]:focus-within > div { border-color: #0ea5e9 !important; }
+input:invalid, input[aria-invalid="true"] {
+    border-color: #1a3a6b !important; box-shadow: none !important;
+}
 label { color: #94a3b8 !important; }
 .stTextArea label { display: none; }
 
@@ -1054,13 +1067,46 @@ _pending_run = st.session_state.pop("pending_run", None)
 _is_running  = st.session_state.get("is_running", False)
 
 if _is_running:
-    st.markdown(
-        "<div style='background:#0c1f38;border:1px solid #0369a1;border-radius:10px;"
-        "padding:0.7rem 1.1rem;margin-bottom:0.8rem;color:#7dd3fc;font-size:0.9rem'>"
-        "🔄 &nbsp;<b>Planning your trip…</b> &nbsp;Inputs are locked while we work."
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    st.markdown("""
+<style>
+@keyframes bar-slide {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+<div style="
+    background: linear-gradient(135deg, #0c1f38 0%, #062040 100%);
+    border: 1px solid #0369a1; border-radius: 16px;
+    padding: 1.6rem 2rem 1.4rem; margin-bottom: 1.2rem;
+    text-align: center; position: relative; overflow: hidden;
+">
+  <div style="
+      position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      background: linear-gradient(90deg, #0369a1, #0ea5e9, #06b6d4, #67e8f9, #0369a1);
+      background-size: 200% 100%;
+      animation: bar-slide 1.6s linear infinite;
+  "></div>
+
+  <div style="
+      width: 40px; height: 40px; border-radius: 50%;
+      border: 3px solid #1a3a6b; border-top-color: #0ea5e9;
+      animation: spin 0.9s linear infinite;
+      margin: 0 auto 0.9rem;
+  "></div>
+
+  <div style="color:#7dd3fc; font-size:1.1rem; font-weight:700; margin-bottom:0.35rem;">
+      ✈️ &nbsp;Building Your Travel Plan…
+  </div>
+  <div style="color:#475569; font-size:0.83rem; line-height:1.6;">
+      Searching flights &nbsp;·&nbsp; Hotels &nbsp;·&nbsp; Weather &nbsp;·&nbsp;
+      Nearby attractions &nbsp;·&nbsp; Budget &nbsp;·&nbsp; Itinerary<br>
+      <span style="color:#334155; font-size:0.78rem;">
+          All inputs are locked. This usually takes 30–60 seconds.
+      </span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 
 # ── Quick destinations ────────────────────────────────────────────────────────
@@ -1110,7 +1156,7 @@ with col_s:
     st.markdown('<div class="route-label">📅 Departure Date</div>', unsafe_allow_html=True)
     start_date = st.date_input(
         "start_date", key="start_date",
-        value=date.today() + timedelta(days=7),
+        value=date.today(),
         label_visibility="collapsed", disabled=_is_running,
     )
 with col_e:
@@ -1199,7 +1245,7 @@ with col_hint:
 if run and not _is_running:
     _origin    = st.session_state.get("from_input",    "").strip()
     _dest      = st.session_state.get("to_input",      "").strip()
-    _s_date    = st.session_state.get("start_date",    date.today() + timedelta(days=7))
+    _s_date    = st.session_state.get("start_date",    date.today())
     _e_date    = st.session_state.get("end_date",      date.today() + timedelta(days=14))
     _members   = int(st.session_state.get("n_members", 2))
     _tpref     = st.session_state.get("transport_pref","Mixed (Auto)")
