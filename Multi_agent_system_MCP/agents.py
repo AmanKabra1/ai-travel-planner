@@ -50,12 +50,16 @@ def _llm_text(system: str, prompt: str) -> str:
             return _strip_think(llm.invoke(msgs).content)
         except Exception as exc:
             tried.add(current)
+            exc_str = str(exc)
+            logger.error("Groq model %s error: %s", current, exc_str[:300])
+            # Brief pause on rate-limit (429) errors before trying next model
+            if "429" in exc_str or "rate_limit" in exc_str.lower():
+                import time as _time; _time.sleep(2)
             next_models = [m for m in retry_list if m not in tried]
             if not next_models:
-                raise RuntimeError(f"All Groq models failed. Last: {current} — {exc}") from exc
+                raise RuntimeError(f"All Groq models failed. Last: {current} — {exc_str[:200]}") from exc
             nxt = next_models[0]
-            logger.warning("Groq model %s failed (%s); switching to %s",
-                           current, str(exc)[:80], nxt)
+            logger.warning("Groq model %s failed; switching to %s", current, nxt)
             llm = get_llm(nxt)
     raise RuntimeError("All Groq models exhausted")
 
@@ -852,19 +856,19 @@ USER CHOICES (apply strictly):
 - Special requests: {uc_special if uc_special else "None"}
 
 ═══ PRE-FETCHED TRANSPORT DATA (flights, trains, buses) ═══
-{state.get('transport_results', 'Not fetched.')}
+{(state.get('transport_results') or 'Not fetched.')[:3500]}
 
 ═══ PRE-FETCHED HOTELS DATA (with booking links) ═══
-{state.get('hotel_results', 'Not fetched.')}
+{(state.get('hotel_results') or 'Not fetched.')[:3000]}
 
 ═══ WEATHER DATA ═══
-{state.get('weather_results', 'Not fetched.')}
+{(state.get('weather_results') or 'Not fetched.')[:1500]}
 
 ═══ NEARBY ATTRACTIONS, LOCAL FOOD & MARKETS DATA (USE for day-by-day planning) ═══
-{state.get('nearby_results', 'Not fetched.')[:4500]}
+{(state.get('nearby_results') or 'Not fetched.')[:4500]}
 
 ═══ BUDGET ANALYSIS ═══
-{state.get('budget_results', 'Not fetched.')}
+{(state.get('budget_results') or 'Not fetched.')[:2000]}
 
 Remember: output JSON block first, then ---PROSE--- separator, then markdown summary.
 """,
