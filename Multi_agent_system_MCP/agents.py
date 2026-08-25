@@ -24,11 +24,20 @@ llm = get_llm()
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_think(text: str) -> str:
+    """Remove <think>…</think> chain-of-thought blocks from reasoning models."""
+    return _THINK_RE.sub("", text).strip()
+
+
 def _llm_text(system: str, prompt: str) -> str:
     """Call the LLM, auto-switching to the next model on any API error.
 
     Uses the live Groq model list (fetched at startup) so we only try real,
     current model IDs — not stale ones from the static GROQ_FALLBACKS list.
+    Strips <think> blocks produced by reasoning models (e.g. DeepSeek R1).
     """
     global llm
     msgs = [SystemMessage(content=system), HumanMessage(content=prompt)]
@@ -37,7 +46,7 @@ def _llm_text(system: str, prompt: str) -> str:
     for _ in range(len(retry_list) + 1):
         current = getattr(llm, "model_name", "") or getattr(llm, "model", "")
         try:
-            return llm.invoke(msgs).content
+            return _strip_think(llm.invoke(msgs).content)
         except Exception as exc:
             tried.add(current)
             next_models = [m for m in retry_list if m not in tried]
@@ -342,31 +351,44 @@ Do not output raw JSON.
 
 # ── Weather agent ─────────────────────────────────────────────────────────────
 
-def _fmt_weather(now_raw: str, fore_raw: str) -> str:
-    """Format raw MCP weather JSON into readable markdown."""
+def _extract_json(text: str) -> dict:
+    """Extract the first JSON object from *text* (handles prefix/suffix prose)."""
     import json as _j
+    # Try direct parse first
+    try:
+        return _j.loads(text)
+    except Exception:
+        pass
+    # Regex: find the outermost { … }
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if m:
+        return _j.loads(m.group())
+    raise ValueError("No JSON object found in text")
 
+
+def _fmt_weather(now_raw: str, fore_raw: str) -> str:
+    """Format raw MCP weather text (JSON or prose+JSON) into readable markdown."""
     lines: list[str] = []
 
     # ── Current conditions ──────────────────────────────────────────────────
     try:
-        now = _j.loads(now_raw)
-        city = now.get("city", "")
-        lines.append(f"## 🌤️ Weather in {city}\n")
+        now        = _extract_json(now_raw)
+        city       = now.get("city", "")
+        cond       = now.get("condition", "-")
+        temp       = now.get("temperature_c", "-")
+        feels      = now.get("feels_like_c", "-")
+        humidity   = now.get("humidity_%", "-")
+        wind       = now.get("wind_speed_kmh", "-")
+        visibility = now.get("visibility_km", "-")
+        lines.append(f"## Weather in {city}\n")
         lines.append("### Current Conditions")
-        cond       = now.get("condition", "—")
-        temp       = now.get("temperature_c", "—")
-        feels      = now.get("feels_like_c", "—")
-        humidity   = now.get("humidity_%", "—")
-        wind       = now.get("wind_speed_kmh", "—")
-        visibility = now.get("visibility_km", "—")
-        lines.append(f"| | |")
-        lines.append(f"|---|---|")
-        lines.append(f"| ☁️ Condition     | {cond} |")
-        lines.append(f"| 🌡️ Temperature   | {temp}°C (feels like {feels}°C) |")
-        lines.append(f"| 💧 Humidity      | {humidity}% |")
-        lines.append(f"| 💨 Wind speed    | {wind} km/h |")
-        lines.append(f"| 👁️ Visibility    | {visibility} km |")
+        lines.append("| | |")
+        lines.append("|---|---|")
+        lines.append(f"| Condition     | {cond} |")
+        lines.append(f"| Temperature   | {temp} C (feels like {feels} C) |")
+        lines.append(f"| Humidity      | {humidity}% |")
+        lines.append(f"| Wind speed    | {wind} km/h |")
+        lines.append(f"| Visibility    | {visibility} km |")
     except Exception:
         lines.append("### Current Conditions")
         lines.append(now_raw)
@@ -375,25 +397,24 @@ def _fmt_weather(now_raw: str, fore_raw: str) -> str:
 
     # ── Forecast ────────────────────────────────────────────────────────────
     try:
-        fore = _j.loads(fore_raw)
+        fore = _extract_json(fore_raw)
         days = fore.get("forecast", [])
         if days:
-            lines.append("### 📅 Forecast")
+            lines.append("### Forecast (next 3 days)")
             lines.append("| Date | Max | Min | Condition | Rain |")
             lines.append("|------|-----|-----|-----------|------|")
             for d in days:
-                date  = d.get("date", "")
-                hi    = d.get("max_temp_c", "—")
-                lo    = d.get("min_temp_c", "—")
-                cond  = d.get("condition", "—")
-                rain  = d.get("rain_mm", 0)
-                lines.append(f"| {date} | {hi}°C | {lo}°C | {cond} | {rain} mm |")
+                date = d.get("date", "")
+                hi   = d.get("max_temp_c", "-")
+                lo   = d.get("min_temp_c", "-")
+                cond = d.get("condition", "-")
+                rain = d.get("rain_mm", 0)
+                lines.append(f"| {date} | {hi} C | {lo} C | {cond} | {rain} mm |")
             lines.append("")
-            # Sunrise/sunset from first day
             sr = days[0].get("sunrise", "")
             ss = days[0].get("sunset", "")
             if sr or ss:
-                lines.append(f"🌅 Sunrise: **{sr}**  &nbsp;|&nbsp;  🌇 Sunset: **{ss}**")
+                lines.append(f"Sunrise: {sr}  |  Sunset: {ss}")
     except Exception:
         lines.append("### Forecast")
         lines.append(fore_raw)

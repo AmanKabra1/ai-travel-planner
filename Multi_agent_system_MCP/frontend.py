@@ -740,17 +740,33 @@ def _build_pdf_bytes(state: dict) -> bytes:
         ("Budget Breakdown",      state.get("budget_results", "")),
     ]
 
+    _LATIN1 = str.maketrans({
+        "—": "-",  "–": "-",   # em dash, en dash
+        "‘": "'",  "’": "'",   # curly apostrophes
+        "“": '"',  "”": '"',   # curly double-quotes
+        "₹": "Rs.", "°": " C", # rupee sign, degree symbol
+        "•": "*",  "…": "...", # bullet, ellipsis
+        "é": "e",  "è": "e",  "ê": "e", "ë": "e",
+        "à": "a",  "â": "a",  "ä": "a", "ã": "a",
+        "ü": "u",  "û": "u",  "ù": "u", "ú": "u",
+        "ö": "o",  "ô": "o",  "ó": "o", "õ": "o",
+        "î": "i",  "ï": "i",  "í": "i",
+        "ç": "c",  "ñ": "n",
+    })
+
     def _clean(text: str) -> str:
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r"\*{1,3}(.*?)\*{1,3}", r"\1", text)
         text = re.sub(r"`{1,3}.*?`{1,3}", "", text, flags=re.DOTALL)
         text = re.sub(r"#{1,6}\s*", "", text)
         text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
         text = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", text)
-        text = re.sub(r"^[-*]\s+", "  • ", text, flags=re.MULTILINE)
+        text = re.sub(r"^[-*]\s+", "  * ", text, flags=re.MULTILINE)
         text = re.sub(r"^\|.*\|$", "", text, flags=re.MULTILINE)
         text = re.sub(r"^[-|: ]+$", "", text, flags=re.MULTILINE)
         text = re.sub(r"\n{3,}", "\n\n", text)
-        return text.strip()
+        text = text.translate(_LATIN1)
+        return text.encode("latin-1", errors="replace").decode("latin-1").strip()
 
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=18)
@@ -774,7 +790,7 @@ def _build_pdf_bytes(state: dict) -> bytes:
     pdf.set_font("Helvetica", "B", 22)
     pdf.set_text_color(3, 105, 161)
     dest_clean = _clean(dest)
-    pdf.cell(0, 10, f"Travel Plan — {dest_clean}", ln=True, align="C")
+    pdf.cell(0, 10, f"Travel Plan - {dest_clean}", ln=True, align="C")
 
     pdf.set_font("Helvetica", "", 11)
     pdf.set_text_color(71, 85, 105)
@@ -834,7 +850,7 @@ def _build_pdf_bytes(state: dict) -> bytes:
     pdf.set_y(-14)
     pdf.set_font("Helvetica", "I", 8)
     pdf.set_text_color(148, 163, 184)
-    pdf.cell(0, 5, f"Wandr — AI Travel Planner  |  {dest_clean}  |  {now}", align="C")
+    pdf.cell(0, 5, f"Wandr - AI Travel Planner  |  {dest_clean}  |  {now}", align="C")
 
     return bytes(pdf.output())
 
@@ -1475,8 +1491,19 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_result
                 unsafe_allow_html=True,
             )
     with tab_wx:
-        content = result.get("weather_results")
+        content = result.get("weather_results", "")
         if content:
+            # If the content is still raw JSON (old cached trip), format it on the fly
+            if '"temperature_c"' in content or content.strip().lstrip("* \n").startswith("{"):
+                import re as _re, json as _j
+                now_m = _re.search(r'\{[^{}]*"temperature_c"[^{}]*\}', content, _re.DOTALL)
+                fore_m = _re.search(r'\{[^{}]*"forecast".*?\}', content, _re.DOTALL)
+                if now_m or fore_m:
+                    from agents import _fmt_weather
+                    content = _fmt_weather(
+                        now_m.group() if now_m else "{}",
+                        fore_m.group() if fore_m else "{}",
+                    )
             st.markdown(content)
         else:
             st.markdown(
@@ -1484,7 +1511,10 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_result
                 unsafe_allow_html=True,
             )
     with tab_nb:
-        content = result.get("nearby_results")
+        content = result.get("nearby_results", "")
+        # Strip any <think>…</think> reasoning blocks
+        import re as _re2
+        content = _re2.sub(r"<think>.*?</think>", "", content, flags=_re2.DOTALL | _re2.IGNORECASE).strip()
         if content:
             st.markdown(content)
         else:
