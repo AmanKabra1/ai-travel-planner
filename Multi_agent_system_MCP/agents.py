@@ -108,6 +108,19 @@ def _extract_tavily_with_urls(raw) -> str:
     return text
 
 
+async def _parallel_tavily(*queries: str) -> list[str]:
+    """Run multiple Tavily searches concurrently and return formatted strings."""
+    raw_list = await asyncio.gather(*[tavily_search(q) for q in queries], return_exceptions=True)
+    out = []
+    for raw in raw_list:
+        if isinstance(raw, Exception):
+            logger.warning("Parallel Tavily search failed: %s", raw)
+            out.append("")
+        else:
+            out.append(_extract_tavily_with_urls(raw)[:1500])
+    return out
+
+
 # ── Supervisor ────────────────────────────────────────────────────────────────
 
 def supervisor_agent(state: TravelState):
@@ -319,31 +332,13 @@ def transport_agent(state: TravelState):
 
     route_str = f"{origin} to {destination}" if origin else destination
 
-    def _tsearch(q: str, label: str) -> str:
-        try:
-            raw = asyncio.run(tavily_search(q))
-            return _extract_tavily_with_urls(raw)[:2000]
-        except Exception as exc:
-            logger.warning("Transport search '%s' failed: %s", label, exc)
-            return ""
-
-    # ── Multi-search: direct trains, via-connections, buses, general tips ─────
-    train_direct = _tsearch(
+    # ── All 4 transport searches run in parallel ──────────────────────────────
+    train_direct, train_via, bus_search, general = asyncio.run(_parallel_tavily(
         f"train {route_str} 2026 direct schedule timing fare IRCTC booking",
-        "train_direct",
-    )
-    train_via = _tsearch(
         f"how to reach {destination} from {origin} by train 2026 via connecting junction route change",
-        "train_via",
-    )
-    bus_search = _tsearch(
         f"bus {route_str} 2026 Redbus Abhibus schedule timing booking fare",
-        "bus",
-    )
-    general = _tsearch(
         f"{route_str} travel options 2026 how to reach fastest cheapest transport",
-        "general",
-    )
+    ))
 
     result = _llm_text(
         "You are a ground transport specialist. You always show real schedules, fares, and booking links.",
@@ -522,107 +517,64 @@ def nearby_agent(state: TravelState):
     logger.info("Nearby agent — '%s' (%s) coords: %.4f, %.4f", destination, place_type, lat, lon)
 
     dest_enc = destination.replace(" ", "+")
-    gmaps_base = f"https://www.google.com/maps/search/{dest_enc}"
+    gmaps    = f"https://www.google.com/maps/search/{dest_enc}"
 
-    # ── Overpass POIs — capped at 8 per bucket to keep prompt compact ────────
+    # ── Overpass POIs — 6 per bucket max ─────────────────────────────────────
     pois    = overpass_nearby(lat, lon, radius_m=100_000)
     buckets = bucket_pois(pois)
     logger.info("Nearby agent — %d POIs found", len(pois))
 
-    # ── Wikivoyage ────────────────────────────────────────────────────────────
-    wiki_tips = wikivoyage_local_tips(destination, region=region, country=country)
+    # ── 3 Tavily searches run IN PARALLEL ─────────────────────────────────────
+    t_attr, t_food, t_review = asyncio.run(_parallel_tavily(
+        f"best places to visit {destination} {region} {country} 2026 tourist attractions complete guide",
+        f"famous local food street food restaurants {destination} 2026 must eat where to find price",
+        f"tripadvisor {destination} hidden gems travel review 2026 offbeat things to do",
+    ))
 
-    # ── Parallel Tavily searches (run sequentially to avoid event-loop issues) ─
-    def _tsearch(q: str) -> str:
-        try:
-            raw = asyncio.run(tavily_search(q))
-            return _extract_tavily_with_urls(raw)[:1500]
-        except Exception as exc:
-            logger.warning("Nearby Tavily '%s' failed: %s", q[:50], exc)
-            return ""
-
-    # Always run: attractions + food + culture + social/review searches
-    t_attractions = _tsearch(
-        f"best tourist places attractions {destination} {region} 2026 must visit complete guide"
-    )
-    t_food = _tsearch(
-        f"famous food street food restaurants {destination} {region} 2026 local specialties where to eat"
-    )
-    t_hidden = _tsearch(
-        f"hidden gems offbeat places {destination} {region} {country} 2026 travel blog review"
-    )
-    t_tripadvisor = _tsearch(
-        f"tripadvisor {destination} top attractions things to do 2026 reviews"
-    )
-
-    # ── Compact POI bucket summary (max 8 per bucket) ────────────────────────
-    bucket_summary = "\n".join([
-        f"Within 10km: {format_pois_text(buckets['within_10km'], 8)}",
-        f"10-30km: {format_pois_text(buckets['10_to_30km'], 8)}",
-        f"30-50km: {format_pois_text(buckets['30_to_50km'], 8)}",
-        f"50-100km: {format_pois_text(buckets['50_to_100km'], 8)}",
+    # ── Compact POI summary (6 per bucket) ───────────────────────────────────
+    bucket_txt = "\n".join([
+        f"≤10km: {format_pois_text(buckets['within_10km'], 6)}",
+        f"10-30km: {format_pois_text(buckets['10_to_30km'], 6)}",
+        f"30-50km: {format_pois_text(buckets['30_to_50km'], 6)}",
+        f"50-100km: {format_pois_text(buckets['50_to_100km'], 6)}",
     ])
 
-    wiki_summary = "\n\n".join(
-        f"{k.title()}: {v[:400]}" for k, v in wiki_tips.items()
-    ) or f"No Wikivoyage data for {destination}."
-
-    web_data = "\n\n---\n\n".join(t for t in [t_attractions, t_food, t_hidden, t_tripadvisor] if t)
+    web_data = "\n---\n".join(t for t in [t_attr, t_food, t_review] if t)
 
     result = _llm_text(
-        "You are a local travel expert with 2026 knowledge. Produce a rich, specific, practical guide.",
-        f"""Write a detailed local guide for {destination}, {region}, {country}.
+        "You are a local travel expert with 2026 knowledge. Be specific, use real names, include Google Maps links.",
+        f"""Local guide for {destination}, {region}, {country}.
 
-=== MAP DATA (OpenStreetMap POIs) ===
-{bucket_summary}
+OSM MAP DATA:
+{bucket_txt}
 
-=== WIKIVOYAGE DATA ===
-{wiki_summary[:1200]}
+WEB SEARCH DATA (2026):
+{web_data[:4000]}
 
-=== WEB / SOCIAL / REVIEW DATA (2026) ===
-{web_data[:4500]}
+Write Markdown with these sections (be concise but specific):
 
-Write clean Markdown with these sections:
+## 📍 Nearby Attractions
+### ≤ 10 km
+- **Name** (type) — why visit · entry fee · [Map]({gmaps}+name)
+### 10–30 km — Day Trips
+### 30–100 km — Excursions
+(4–6 places per section; use web data where OSM is sparse)
 
-## 📍 Attractions by Distance from {destination}
+## 🍜 Local Food & Restaurants
+- Dish name — where to find — Rs. price · [Find]({gmaps}+food)
+(List 6–8 items)
 
-### ≤ 10 km — In the City
-For each place: **Name** (type) — brief why worth visiting · entry fee if known
-Add a Google Maps link: [View on Maps]({gmaps_base}+NAME) replacing NAME with the place name.
+## 🛍️ Markets & Shopping
+- Market name — what's sold — best time
 
-### 10 – 30 km — Easy Day Trips
+## 🎭 Culture & Festivals 2026
+- Key temples / events / customs
 
-### 30 – 50 km — Half-Day Excursions
+## 🚕 Getting Around
+- Auto / bus / cab rates and tips
 
-### 50 – 100 km — Full-Day or Overnight Trips
-
-For each distance band list at least 4–6 specific named places. If OSM data is sparse, use the web search data.
-
-## 🍜 Local Food & Where to Eat
-- 6–8 signature dishes / street foods this place is famous for
-- Specific streets, markets, or eateries where to find each (use real names from search data)
-- Approximate price per person
-- [Find on Google Maps]({gmaps_base}+restaurants)
-
-## 🛍️ Shopping & Markets
-- Specific market names, what they sell, best time to visit, how to bargain
-- [Explore Markets]({gmaps_base}+market)
-
-## 🎭 Culture, Temples & Festivals
-- Religious / cultural sites with visiting hours and dress code tips
-- Upcoming festivals or seasonal events in 2026
-- Local customs visitors must know
-
-## 🚕 Getting Around Locally
-- Auto-rickshaw / e-rickshaw / tempo rates
-- Local bus routes
-- App-based cabs availability (Ola/Uber/local apps)
-- Approximate daily local transport budget
-
-## 💎 Hidden Gems & Insider Tips
-- Off-the-beaten-path spots from the travel blogs / reviews
-- Specific local experiences tourists usually miss
-- Best time of day to visit crowded attractions
+## 💎 Hidden Gems
+- 3–4 offbeat spots from reviews
 """,
     )
 
@@ -645,10 +597,11 @@ def budget_agent(state: TravelState):
     price_data = ""
     if destination:
         try:
-            raw = asyncio.run(tavily_search(
-                f"{destination} travel cost 2026 hotel price food budget per day per person India"
+            results = asyncio.run(_parallel_tavily(
+                f"{destination} travel cost 2026 hotel price food budget per day per person",
+                f"{destination} entry fees tourist places 2026 ticket prices activities cost",
             ))
-            price_data = _extract_tavily_with_urls(raw)[:2000]
+            price_data = "\n---\n".join(r for r in results if r)[:2500]
         except Exception as exc:
             logger.warning("Budget price search failed: %s", exc)
 
