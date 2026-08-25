@@ -1561,9 +1561,17 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_result
         content = result.get("itinerary")
         if content:
             st.markdown(content)
+        elif st.session_state.get("waiting_for_approval"):
+            st.markdown(
+                '<div class="tip-card"><div class="tip-card-text">'
+                '📋 Research complete! Scroll down to the <b style="color:#0ea5e9">review panel</b> '
+                'below — choose your transport, hotel &amp; style, then click Generate to build your itinerary.'
+                '</div></div>',
+                unsafe_allow_html=True,
+            )
         else:
             st.markdown(
-                '<div class="tip-card"><div class="tip-card-text">The day-by-day itinerary will appear here.</div></div>',
+                '<div class="tip-card"><div class="tip-card-text">The day-by-day itinerary will appear here after you review and confirm your preferences.</div></div>',
                 unsafe_allow_html=True,
             )
 

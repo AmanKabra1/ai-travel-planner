@@ -261,23 +261,39 @@ def flight_agent(state: TravelState):
         airport_text = airline_text = "Live data unavailable."
 
     result = _llm_text(
-        "You are a flight planning specialist.",
-        f"""Create flight guidance for this trip.
+        "You are a FLIGHTS-ONLY specialist. "
+        "Output ONLY flight information — airports, airlines, fares, booking links. "
+        "Do NOT write a travel itinerary. Do NOT mention hotels, food, or sightseeing. "
+        "If no direct flight exists for the route, say so clearly and show the best 1-stop option.",
+        f"""Provide flight options for this route ONLY.
 
-User request:
-{query}
-
-Trip constraints:
-{constraints}
+Route: {constraints.get('origin', '?')} → {constraints.get('destination', '?')}
+Dates: {constraints.get('start_date', '?')} to {constraints.get('end_date', '?')}
+Travellers: {constraints.get('members', 2)}
 
 Airport data:
-{airport_text}
+{airport_text[:2000]}
 
 Airline data:
-{airline_text}
+{airline_text[:2000]}
 
-Cover: likely airports, relevant airlines, estimated duration,
-fare range, peak-season warnings, and booking tips.
+Return ONLY this markdown structure — nothing else:
+
+## ✈️ Flights: {constraints.get('origin', '?')} → {constraints.get('destination', '?')}
+
+### Direct Flights
+(List any direct flights, or write "No direct flights on this route.")
+
+### 1-Stop / Connecting Options
+- Via [Hub City]: Airline, approx. fare Rs./$ X, total ~X hrs
+- [Book](https://www.google.com/flights?q=flights+from+{constraints.get('origin','')!r}+to+{constraints.get('destination','')!r})
+
+### Nearest Airports
+- Origin: [Airport name, IATA code, X km from city centre]
+- Destination: [Airport name, IATA code, X km from city centre]
+
+### Tips
+- Best time to book, baggage allowance, budget vs full-service comparison (2 bullet points max)
 """,
     )
 
