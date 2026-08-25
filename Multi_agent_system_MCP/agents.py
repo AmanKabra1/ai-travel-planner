@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import json
 import logging
 import re
@@ -108,17 +109,22 @@ def _extract_tavily_with_urls(raw) -> str:
     return text
 
 
-async def _parallel_tavily(*queries: str) -> list[str]:
-    """Run multiple Tavily searches concurrently and return formatted strings."""
-    raw_list = await asyncio.gather(*[tavily_search(q) for q in queries], return_exceptions=True)
-    out = []
-    for raw in raw_list:
-        if isinstance(raw, Exception):
-            logger.warning("Parallel Tavily search failed: %s", raw)
-            out.append("")
-        else:
-            out.append(_extract_tavily_with_urls(raw)[:1500])
-    return out
+def _tavily_one(query: str, cap: int = 1500) -> str:
+    """Run a single Tavily search synchronously (safe to call from any thread)."""
+    try:
+        raw = asyncio.run(tavily_search(query))
+        return _extract_tavily_with_urls(raw)[:cap]
+    except Exception as exc:
+        logger.warning("Tavily search failed (%s): %s", query[:60], exc)
+        return ""
+
+
+def _parallel_tavily(*queries: str, cap: int = 1500) -> list[str]:
+    """Run multiple Tavily searches in parallel threads — each thread owns its
+    own event loop so there are no asyncio nesting / loop-reuse conflicts."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(queries)) as pool:
+        futures = [pool.submit(_tavily_one, q, cap) for q in queries]
+        return [f.result() for f in futures]
 
 
 # ── Supervisor ────────────────────────────────────────────────────────────────
@@ -332,13 +338,13 @@ def transport_agent(state: TravelState):
 
     route_str = f"{origin} to {destination}" if origin else destination
 
-    # ── All 4 transport searches run in parallel ──────────────────────────────
-    train_direct, train_via, bus_search, general = asyncio.run(_parallel_tavily(
+    # ── All 4 transport searches run in parallel threads ──────────────────────
+    train_direct, train_via, bus_search, general = _parallel_tavily(
         f"train {route_str} 2026 direct schedule timing fare IRCTC booking",
         f"how to reach {destination} from {origin} by train 2026 via connecting junction route change",
         f"bus {route_str} 2026 Redbus Abhibus schedule timing booking fare",
         f"{route_str} travel options 2026 how to reach fastest cheapest transport",
-    ))
+    )
 
     result = _llm_text(
         "You are a ground transport specialist. You always show real schedules, fares, and booking links.",
@@ -519,17 +525,26 @@ def nearby_agent(state: TravelState):
     dest_enc = destination.replace(" ", "+")
     gmaps    = f"https://www.google.com/maps/search/{dest_enc}"
 
-    # ── Overpass POIs — 6 per bucket max ─────────────────────────────────────
-    pois    = overpass_nearby(lat, lon, radius_m=100_000)
-    buckets = bucket_pois(pois)
-    logger.info("Nearby agent — %d POIs found", len(pois))
+    # ── Overpass POIs (smaller radius = faster; guarded against timeout) ──────
+    try:
+        pois    = overpass_nearby(lat, lon, radius_m=50_000)   # 50 km, not 100 km
+        buckets = bucket_pois(pois)
+        logger.info("Nearby agent — %d POIs found", len(pois))
+    except Exception as exc:
+        logger.warning("Overpass failed, continuing without map data: %s", exc)
+        pois    = []
+        buckets = {"within_10km": [], "10_to_30km": [], "30_to_50km": [], "50_to_100km": []}
 
-    # ── 3 Tavily searches run IN PARALLEL ─────────────────────────────────────
-    t_attr, t_food, t_review = asyncio.run(_parallel_tavily(
-        f"best places to visit {destination} {region} {country} 2026 tourist attractions complete guide",
-        f"famous local food street food restaurants {destination} 2026 must eat where to find price",
-        f"tripadvisor {destination} hidden gems travel review 2026 offbeat things to do",
-    ))
+    # ── 3 Tavily searches run in parallel threads ─────────────────────────────
+    try:
+        t_attr, t_food, t_review = _parallel_tavily(
+            f"best places to visit {destination} {region} {country} 2026 tourist attractions complete guide",
+            f"famous local food street food restaurants {destination} 2026 must eat where to find price",
+            f"tripadvisor {destination} hidden gems travel review 2026 offbeat things to do",
+        )
+    except Exception as exc:
+        logger.warning("Nearby parallel Tavily failed: %s", exc)
+        t_attr = t_food = t_review = ""
 
     # ── Compact POI summary (6 per bucket) ───────────────────────────────────
     bucket_txt = "\n".join([
@@ -540,6 +555,11 @@ def nearby_agent(state: TravelState):
     ])
 
     web_data = "\n---\n".join(t for t in [t_attr, t_food, t_review] if t)
+    if not web_data and not any(buckets.values()):
+        return {
+            "nearby_results": f"Web search data unavailable for {destination} — please check your internet connection.",
+            "messages":       [AIMessage(content="Nearby agent returned no data.")],
+        }
 
     result = _llm_text(
         "You are a local travel expert with 2026 knowledge. Be specific, use real names, include Google Maps links.",
@@ -593,14 +613,14 @@ def budget_agent(state: TravelState):
     destination = constraints.get("destination", "")
     members     = constraints.get("members", 2)
 
-    # Live 2026 price search for the destination
+    # Live 2026 price search for the destination (parallel threads)
     price_data = ""
     if destination:
         try:
-            results = asyncio.run(_parallel_tavily(
+            results = _parallel_tavily(
                 f"{destination} travel cost 2026 hotel price food budget per day per person",
                 f"{destination} entry fees tourist places 2026 ticket prices activities cost",
-            ))
+            )
             price_data = "\n---\n".join(r for r in results if r)[:2500]
         except Exception as exc:
             logger.warning("Budget price search failed: %s", exc)
