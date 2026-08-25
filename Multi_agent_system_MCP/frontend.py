@@ -473,23 +473,6 @@ button[kind="header"]               { display: none !important; }
     }).observe(document.body, { childList: true, subtree: true });
 })();
 
-(function localTimestamps() {
-    function convertAll() {
-        document.querySelectorAll('[data-utcts]').forEach(function(el) {
-            if (el.dataset.converted) return;
-            try {
-                var d = new Date(el.dataset.utcts);
-                if (isNaN(d.getTime())) return;
-                el.textContent = d.toLocaleDateString(undefined, {year:'numeric', month:'short', day:'numeric'})
-                    + ' ' + d.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit'});
-                el.dataset.converted = '1';
-            } catch(e) {}
-        });
-    }
-    convertAll();
-    new MutationObserver(function() { convertAll(); })
-        .observe(document.body, { childList: true, subtree: true });
-})();
 </script>
 """, unsafe_allow_html=True)
 
@@ -1299,8 +1282,20 @@ with st.sidebar:
             dot    = "🟢 " if active else ""
 
             if ts_iso:
+                _sid_safe = tid.replace("-", "_").replace(".", "_")
                 ts_html = (
-                    f'<span data-utcts="{ts_iso}" style="color:#334155;font-size:0.72rem">…</span>'
+                    f'<span id="ts_{_sid_safe}" style="color:#334155;font-size:0.72rem">{ts_iso[:16].replace("T"," ")}</span>'
+                    f'<script>'
+                    f'(function(){{'
+                    f'var el=document.getElementById("ts_{_sid_safe}");'
+                    f'if(!el)return;'
+                    f'try{{var d=new Date("{ts_iso}");'
+                    f'if(!isNaN(d.getTime()))'
+                    f'el.textContent=d.toLocaleDateString(undefined,{{year:"numeric",month:"short",day:"numeric"}})'
+                    f'+" "+d.toLocaleTimeString(undefined,{{hour:"2-digit",minute:"2-digit"}});'
+                    f'}}catch(e){{}}'
+                    f'}})();'
+                    f'</script>'
                 )
             else:
                 ts_html = '<span style="color:#334155;font-size:0.72rem">—</span>'
