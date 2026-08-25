@@ -736,6 +736,7 @@ def _build_pdf_bytes(state: dict) -> bytes:
     """Generate a professional travel-itinerary PDF using fpdf2."""
     import re
     from fpdf import FPDF
+    from fpdf.enums import XPos, YPos
 
     tc        = state.get("trip_constraints") or {}
     dest      = tc.get("destination", "Trip")
@@ -822,11 +823,11 @@ def _build_pdf_bytes(state: dict) -> bytes:
     pdf.set_y(38)
     pdf.set_font("Helvetica", "B", 36)
     pdf.set_text_color(255, 255, 255)
-    pdf.cell(0, 14, "WANDR", align="C", ln=True)
+    pdf.cell(0, 14, "WANDR", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     pdf.set_font("Helvetica", "", 11)
     pdf.set_text_color(148, 163, 184)
-    pdf.cell(0, 7, "AI Travel Planner", align="C", ln=True)
+    pdf.cell(0, 7, "AI Travel Planner", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     # Gold divider line
     pdf.ln(10)
@@ -852,7 +853,7 @@ def _build_pdf_bytes(state: dict) -> bytes:
     if info_parts:
         pdf.set_font("Helvetica", "", 12)
         pdf.set_text_color(202, 138, 4)
-        pdf.cell(0, 7, "  |  ".join(info_parts), align="C", ln=True)
+        pdf.cell(0, 7, "  |  ".join(info_parts), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     pdf.ln(20)
 
@@ -878,15 +879,15 @@ def _build_pdf_bytes(state: dict) -> bytes:
         pdf.set_xy(34, card_y + 5)
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(202, 138, 4)
-        pdf.cell(0, 5, "YOUR PREFERENCES", ln=True)
+        pdf.cell(0, 5, "YOUR PREFERENCES", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_x(34)
         for lbl, val in pref_items:
             pdf.set_font("Helvetica", "B", 9)
             pdf.set_text_color(148, 163, 184)
-            pdf.cell(28, 7, f"{lbl}:", ln=False)
+            pdf.cell(28, 7, f"{lbl}:", new_x=XPos.RIGHT, new_y=YPos.TOP)
             pdf.set_font("Helvetica", "", 9)
             pdf.set_text_color(220, 230, 240)
-            pdf.cell(0, 7, val[:70], ln=True)
+            pdf.cell(0, 7, val[:70], new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.set_x(34)
         pdf.ln(6)
 
@@ -933,7 +934,7 @@ def _build_pdf_bytes(state: dict) -> bytes:
         pdf.set_font("Helvetica", "B", 12)
         pdf.set_text_color(255, 255, 255)
         pdf.set_xy(16, y + 1.5)
-        pdf.cell(178, 8, title.upper(), ln=True)
+        pdf.cell(178, 8, title.upper(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_x(pdf.l_margin)
         pdf.set_text_color(30, 41, 59)
         pdf.ln(3)
@@ -955,7 +956,7 @@ def _build_pdf_bytes(state: dict) -> bytes:
         pdf.set_text_color(r, g, b)
         pdf.set_xy(22, y + 1)
         txt = re.sub(r"\s+", " ", line.strip())
-        pdf.cell(172, 6, _clean(txt), ln=True)
+        pdf.cell(172, 6, _clean(txt), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_x(pdf.l_margin)
         pdf.set_text_color(30, 41, 59)
         pdf.ln(1)
@@ -1002,7 +1003,7 @@ def _build_pdf_bytes(state: dict) -> bytes:
                 try:
                     pdf.set_x(22)
                     pdf.set_font("Helvetica", "", 9.5)
-                    pdf.cell(4, 5, "-", ln=False)
+                    pdf.cell(4, 5, "-", new_x=XPos.RIGHT, new_y=YPos.TOP)
                     pdf.set_x(26)
                     pdf.multi_cell(eff_w - 12, 5, bullet_text)
                 except Exception:

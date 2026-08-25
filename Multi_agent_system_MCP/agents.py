@@ -498,26 +498,29 @@ def nearby_agent(state: TravelState):
         pois    = []
         buckets = {"within_10km": [], "10_to_30km": [], "30_to_50km": [], "50_to_100km": []}
 
-    # ── 3 Tavily searches run in parallel threads ─────────────────────────────
+    # ── 6 parallel Tavily searches: attractions + food + markets + experiences + gems + transport ──
     try:
-        t_attr, t_food, t_review = _parallel_tavily(
-            f"best places to visit {destination} {region} {country} 2026 tourist attractions complete guide",
-            f"famous local food street food restaurants {destination} 2026 must eat where to find price",
-            f"tripadvisor {destination} hidden gems travel review 2026 offbeat things to do",
+        t_attr, t_food, t_markets, t_exp, t_gems, t_tips = _parallel_tavily(
+            f"best tourist places to visit {destination} {region} {country} 2026 sightseeing complete guide top attractions",
+            f"famous local food street food best restaurants {destination} 2026 must-eat dishes where to find price specialty",
+            f"famous local markets bazaars shopping {destination} {region} 2026 what to buy handicrafts souvenirs",
+            f"local experiences activities things to do {destination} 2026 festivals events culture spiritual",
+            f"hidden gems offbeat places {destination} {region} tripadvisor 2026 unique unusual underrated",
+            f"{destination} local transport auto rickshaw taxi prices tips 2026 getting around practical guide",
         )
     except Exception as exc:
         logger.warning("Nearby parallel Tavily failed: %s", exc)
-        t_attr = t_food = t_review = ""
+        t_attr = t_food = t_markets = t_exp = t_gems = t_tips = ""
 
     # ── Compact POI summary (6 per bucket) ───────────────────────────────────
     bucket_txt = "\n".join([
-        f"≤10km: {format_pois_text(buckets['within_10km'], 6)}",
+        f"<=10km: {format_pois_text(buckets['within_10km'], 6)}",
         f"10-30km: {format_pois_text(buckets['10_to_30km'], 6)}",
         f"30-50km: {format_pois_text(buckets['30_to_50km'], 6)}",
         f"50-100km: {format_pois_text(buckets['50_to_100km'], 6)}",
     ])
 
-    web_data = "\n---\n".join(t for t in [t_attr, t_food, t_review] if t)
+    web_data = "\n---\n".join(t for t in [t_attr, t_food, t_markets, t_exp, t_gems, t_tips] if t)
     if not web_data and not any(buckets.values()):
         return {
             "nearby_results": f"Web search data unavailable for {destination} — please check your internet connection.",
@@ -525,39 +528,58 @@ def nearby_agent(state: TravelState):
         }
 
     result = _llm_text(
-        "You are a local travel expert with 2026 knowledge. Be specific, use real names, include Google Maps links.",
-        f"""Local guide for {destination}, {region}, {country}.
+        "You are a local expert and food/culture guide. Be very specific — use real dish names, real restaurant/stall names, real market names, real prices. No generic descriptions.",
+        f"""Deep local guide for {destination}, {region}, {country}.
 
-OSM MAP DATA:
+OSM MAP DATA (real POIs within 100 km):
 {bucket_txt}
 
-WEB SEARCH DATA (2026):
-{web_data[:4000]}
+WEB RESEARCH (2026):
+ATTRACTIONS: {t_attr[:1200]}
+---
+LOCAL FOOD: {t_food[:1400]}
+---
+MARKETS & SHOPPING: {t_markets[:1000]}
+---
+EXPERIENCES & FESTIVALS: {t_exp[:900]}
+---
+HIDDEN GEMS: {t_gems[:800]}
+---
+LOCAL TRANSPORT: {t_tips[:700]}
 
-Write Markdown with these sections (be concise but specific):
+Write detailed Markdown with these sections:
 
-## 📍 Nearby Attractions
-### ≤ 10 km
-- **Name** (type) — why visit · entry fee · [Map]({gmaps}+name)
-### 10–30 km — Day Trips
-### 30–100 km — Excursions
-(4–6 places per section; use web data where OSM is sparse)
+## Nearby Attractions
+### Within 10 km
+- **Name** (type) — why visit, entry fee, best time to visit
+### 10-30 km — Day Trips
+### 30-100 km — Excursions
+(4-6 real named places per section; include distance and time from {destination})
 
-## 🍜 Local Food & Restaurants
-- Dish name — where to find — Rs. price · [Find]({gmaps}+food)
-(List 6–8 items)
+## Local Food Guide
+### Must-Eat Dishes
+- **Dish name** — brief description — where to find it (specific stall/restaurant name) — price range Rs. X-Y
+(List 8-10 specific dishes with actual local spots; include breakfast, lunch, snacks, dinner options)
+### Best Restaurants & Dhabas
+- **Name** — specialty — price per person — area/address
 
-## 🛍️ Markets & Shopping
-- Market name — what's sold — best time
+## Famous Markets & Bazaars
+- **Market name** — what it sells (handicrafts / spices / clothing / street food / etc.) — best time to visit — bargaining tips
+(List 4-6 real named markets; include what is unique and famous to buy there)
 
-## 🎭 Culture & Festivals 2026
-- Key temples / events / customs
+## Local Experiences & Culture
+- Temples, ghats, aarti timings, festivals in 2026
+- Unique activities (boat rides, cooking classes, workshops)
+- Dress code and customs to respect
 
-## 🚕 Getting Around
-- Auto / bus / cab rates and tips
+## Hidden Gems & Offbeat Spots
+- 3-4 underrated places most tourists miss — why they are special
 
-## 💎 Hidden Gems
-- 3–4 offbeat spots from reviews
+## Getting Around Locally
+- Auto-rickshaw: typical rates (Rs. per km or fixed routes)
+- Local bus routes and frequency
+- Cab/Ola/Uber availability and estimated fares
+- Walking zones and cycle-rickshaw areas
 """,
     )
 
