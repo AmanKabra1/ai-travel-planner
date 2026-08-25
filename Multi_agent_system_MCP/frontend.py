@@ -1,4 +1,4 @@
-import json
+﻿import json
 import sys
 import uuid
 from datetime import date, datetime, timedelta
@@ -733,144 +733,303 @@ def _build_print_html(state: dict) -> str:
 
 
 def _build_pdf_bytes(state: dict) -> bytes:
-    """Generate a well-designed PDF travel plan using fpdf2."""
+    """Generate a professional travel-itinerary PDF using fpdf2."""
     import re
     from fpdf import FPDF
 
-    dest      = (state.get("trip_constraints") or {}).get("destination", "Trip")
-    s_date    = (state.get("trip_constraints") or {}).get("start_date", "")
-    e_date    = (state.get("trip_constraints") or {}).get("end_date", "")
-    members   = (state.get("trip_constraints") or {}).get("members", "")
+    tc        = state.get("trip_constraints") or {}
+    dest      = tc.get("destination", "Trip")
+    s_date    = tc.get("start_date", "")
+    e_date    = tc.get("end_date", "")
+    members   = tc.get("members", "")
+    budget    = tc.get("budget", "")
     query     = state.get("user_query", "")
     now       = datetime.now().strftime("%d %b %Y")
 
-    sections = [
-        ("Complete Itinerary",            state.get("final_response") or state.get("itinerary", "")),
-        ("Transport (Flights & Trains & Buses)", state.get("transport_results", "")),
-        ("Hotels",                        state.get("hotel_results", "")),
-        ("Weather",                       state.get("weather_results", "")),
-        ("Nearby Attractions",            state.get("nearby_results", "")),
-        ("Budget Breakdown",              state.get("budget_results", "")),
-    ]
+    uch = state.get("user_choices") or {}
 
+    # ── Character translation table (Unicode → Latin-1 equivalents) ──────────
     _LATIN1 = str.maketrans({
-        "—": "-",  "–": "-",   # em dash, en dash
-        "‘": "'",  "’": "'",   # curly apostrophes
-        "“": '"',  "”": '"',   # curly double-quotes
-        "₹": "Rs.", "°": " C", # rupee sign, degree symbol
-        "•": "*",  "…": "...", # bullet, ellipsis
-        "é": "e",  "è": "e",  "ê": "e", "ë": "e",
-        "à": "a",  "â": "a",  "ä": "a", "ã": "a",
-        "ü": "u",  "û": "u",  "ù": "u", "ú": "u",
-        "ö": "o",  "ô": "o",  "ó": "o", "õ": "o",
-        "î": "i",  "ï": "i",  "í": "i",
-        "ç": "c",  "ñ": "n",
+        "—": "-",   "–": "-",    # em/en dash
+        "‘": "’",   "’": "’",    # curly apostrophes
+        0x201c: 0x22,  0x201d: 0x22,   # curly double-quotes -> straight "
+        "₹": "Rs.", "°": "deg",  # rupee, degree
+        "•": "-",   "…": "...",  # bullet, ellipsis
+        "é": "e",   "è": "e",   "ê": "e",
+        "à": "a",   "â": "a",   "ä": "a",
+        "ü": "u",   "û": "u",
+        "ö": "o",   "ô": "o",
+        "î": "i",   "ï": "i",
+        "ç": "c",   "ñ": "n",
     })
 
     def _clean(text: str) -> str:
+        if not text:
+            return ""
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r"\*{1,3}(.*?)\*{1,3}", r"\1", text)
         text = re.sub(r"`{1,3}.*?`{1,3}", "", text, flags=re.DOTALL)
         text = re.sub(r"#{1,6}\s*", "", text)
         text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
         text = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", text)
-        text = re.sub(r"^[-*]\s+", "  * ", text, flags=re.MULTILINE)
         text = re.sub(r"^\|.*\|$", "", text, flags=re.MULTILINE)
         text = re.sub(r"^[-|: ]+$", "", text, flags=re.MULTILINE)
         text = re.sub(r"\n{3,}", "\n\n", text)
         text = text.translate(_LATIN1)
+        # Strip ALL remaining non-Latin-1 characters (emojis, Devanagari, etc.)
+        text = re.sub(r"[^\x00-\xFF]", "", text)
         return text.encode("latin-1", errors="replace").decode("latin-1").strip()
 
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=18)
-    pdf.set_margins(left=18, top=18, right=18)
+    # ── Palette ───────────────────────────────────────────────────────────────
+    # Navy: (15, 23, 42)   Sky: (14, 165, 233)   Gold: (202, 138, 4)
+    # Slate: (71, 85, 105) Light: (241, 245, 249) Ink: (30, 41, 59)
 
-    # ── Cover page ──
-    pdf.add_page()
-    pdf.set_fill_color(3, 105, 161)
-    pdf.rect(0, 0, 210, 60, "F")
+    class WandrPDF(FPDF):
+        def header(self):
+            # Thin top stripe on every content page
+            if self.page_no() > 1:
+                self.set_fill_color(15, 23, 42)
+                self.rect(0, 0, 210, 6, "F")
+                self.set_y(9)
 
-    pdf.set_y(14)
-    pdf.set_font("Helvetica", "B", 28)
-    pdf.set_text_color(255, 255, 255)
-    pdf.cell(0, 12, "Wandr", ln=True, align="C")
+        def footer(self):
+            self.set_y(-12)
+            self.set_font("Helvetica", "I", 7)
+            self.set_text_color(148, 163, 184)
+            self.cell(0, 4, f"Wandr AI Travel Planner  |  {_clean(dest)}  |  Generated {now}  |  Page {self.page_no()}", align="C")
 
-    pdf.set_font("Helvetica", "", 13)
-    pdf.set_text_color(186, 230, 253)
-    pdf.cell(0, 7, "AI Travel Planner", ln=True, align="C")
+    pdf = WandrPDF()
+    pdf.set_auto_page_break(auto=True, margin=16)
+    pdf.set_margins(left=16, top=8, right=16)
+    eff_w = 210 - 32   # 178 mm
 
-    pdf.set_y(70)
-    pdf.set_font("Helvetica", "B", 22)
-    pdf.set_text_color(3, 105, 161)
     dest_clean = _clean(dest)
-    pdf.cell(0, 10, f"Travel Plan - {dest_clean}", ln=True, align="C")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # COVER PAGE
+    # ════════════════════════════════════════════════════════════════════════
+    pdf.add_page()
+
+    # Full navy background
+    pdf.set_fill_color(15, 23, 42)
+    pdf.rect(0, 0, 210, 297, "F")
+
+    # Gold accent bar at top
+    pdf.set_fill_color(202, 138, 4)
+    pdf.rect(0, 0, 210, 5, "F")
+
+    # Centred logo text
+    pdf.set_y(38)
+    pdf.set_font("Helvetica", "B", 36)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 14, "WANDR", align="C", ln=True)
 
     pdf.set_font("Helvetica", "", 11)
-    pdf.set_text_color(71, 85, 105)
-    if s_date or e_date:
-        pdf.cell(0, 7, f"{s_date}  to  {e_date}  |  {members} traveller(s)", ln=True, align="C")
-    pdf.cell(0, 6, f"Generated: {now}", ln=True, align="C")
+    pdf.set_text_color(148, 163, 184)
+    pdf.cell(0, 7, "AI Travel Planner", align="C", ln=True)
 
-    pdf.ln(8)
-    pdf.set_draw_color(14, 165, 233)
-    pdf.set_line_width(0.6)
-    pdf.line(18, pdf.get_y(), 192, pdf.get_y())
-    pdf.ln(6)
+    # Gold divider line
+    pdf.ln(10)
+    pdf.set_draw_color(202, 138, 4)
+    pdf.set_line_width(0.8)
+    pdf.line(40, pdf.get_y(), 170, pdf.get_y())
+    pdf.ln(14)
 
+    # Destination
+    pdf.set_font("Helvetica", "B", 26)
+    pdf.set_text_color(255, 255, 255)
+    pdf.multi_cell(0, 12, f"Trip to {dest_clean}", align="C")
+    pdf.ln(4)
+
+    # Date & members row
+    info_parts = []
+    if s_date and e_date:
+        info_parts.append(f"{s_date} - {e_date}")
+    elif s_date:
+        info_parts.append(s_date)
+    if members:
+        info_parts.append(f"{members} traveller(s)")
+    if info_parts:
+        pdf.set_font("Helvetica", "", 12)
+        pdf.set_text_color(202, 138, 4)
+        pdf.cell(0, 7, "  |  ".join(info_parts), align="C", ln=True)
+
+    pdf.ln(20)
+
+    # User preferences card
+    pref_items = []
+    for lbl, key in [("Transport", "transport"), ("Hotel tier", "hotel"), ("Food", "food"), ("Style", "style")]:
+        val = uch.get(key, "")
+        if val:
+            pref_items.append((lbl, _clean(val)))
+    sp = _clean(uch.get("special_requests") or uch.get("special", ""))
+    if sp:
+        pref_items.append(("Special", sp[:80]))
+
+    if pref_items:
+        # Card background
+        card_y = pdf.get_y()
+        pdf.set_fill_color(30, 41, 59)
+        pdf.rect(28, card_y, 154, 10 + len(pref_items) * 8 + 6, "F")
+        # Gold left edge
+        pdf.set_fill_color(202, 138, 4)
+        pdf.rect(28, card_y, 2, 10 + len(pref_items) * 8 + 6, "F")
+
+        pdf.set_xy(34, card_y + 5)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(202, 138, 4)
+        pdf.cell(0, 5, "YOUR PREFERENCES", ln=True)
+        pdf.set_x(34)
+        for lbl, val in pref_items:
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_text_color(148, 163, 184)
+            pdf.cell(28, 7, f"{lbl}:", ln=False)
+            pdf.set_font("Helvetica", "", 9)
+            pdf.set_text_color(220, 230, 240)
+            pdf.cell(0, 7, val[:70], ln=True)
+            pdf.set_x(34)
+        pdf.ln(6)
+
+    # Trip request quote
     if query:
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.set_text_color(3, 105, 161)
-        pdf.cell(0, 7, "Your Request", ln=True)
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(51, 65, 85)
-        pdf.multi_cell(0, 5.5, _clean(query)[:600])
-        pdf.ln(4)
+        q_y = pdf.get_y() + 6
+        pdf.set_font("Helvetica", "I", 10)
+        pdf.set_text_color(100, 116, 139)
+        pdf.set_xy(28, q_y)
+        pdf.multi_cell(154, 6, f"\"{_clean(query)[:200]}\"")
 
-    # ── Content sections ──
+    # Bottom strip
+    pdf.set_fill_color(202, 138, 4)
+    pdf.rect(0, 292, 210, 5, "F")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # CONTENT SECTIONS
+    # ════════════════════════════════════════════════════════════════════════
+    SECTION_COLORS = {
+        "Complete Itinerary":   (14, 165, 233),   # sky blue
+        "Transport":            (16, 185, 129),   # emerald
+        "Hotels":               (245, 158, 11),   # amber
+        "Weather":              (99,  102, 241),  # indigo
+        "Nearby Attractions":   (236,  72,  153), # pink
+        "Budget Breakdown":     (234,  88,   12), # orange
+    }
+
+    sections = [
+        ("Complete Itinerary",   state.get("final_response") or state.get("itinerary", "")),
+        ("Transport",            state.get("transport_results", "")),
+        ("Hotels",               state.get("hotel_results", "")),
+        ("Weather",              state.get("weather_results", "")),
+        ("Nearby Attractions",   state.get("nearby_results", "")),
+        ("Budget Breakdown",     state.get("budget_results", "")),
+    ]
+
+    def _draw_section_header(pdf, title, color):
+        """Draw a full-width colored section header banner."""
+        y = pdf.get_y()
+        r, g, b = color
+        pdf.set_fill_color(r, g, b)
+        pdf.rect(0, y, 210, 11, "F")
+        # White text
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_xy(16, y + 1.5)
+        pdf.cell(178, 8, title.upper(), ln=True)
+        pdf.set_x(pdf.l_margin)
+        pdf.set_text_color(30, 41, 59)
+        pdf.ln(3)
+
+    def _is_day_header(line: str) -> bool:
+        return bool(re.match(r"^\s*(Day\s*\d+|DAY\s*\d+)", line.strip()))
+
+    def _draw_day_header(pdf, line: str, color):
+        """Draw a tinted day header pill."""
+        r, g, b = color
+        # Light tint (mix toward white)
+        pdf.set_fill_color(min(255, r+180), min(255, g+180), min(255, b+180))
+        y = pdf.get_y()
+        pdf.rect(16, y, 178, 8, "F")
+        # Colored left mark
+        pdf.set_fill_color(r, g, b)
+        pdf.rect(16, y, 3, 8, "F")
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(r, g, b)
+        pdf.set_xy(22, y + 1)
+        txt = re.sub(r"\s+", " ", line.strip())
+        pdf.cell(172, 6, _clean(txt), ln=True)
+        pdf.set_x(pdf.l_margin)
+        pdf.set_text_color(30, 41, 59)
+        pdf.ln(1)
+
     for title, content in sections:
         if not content or not content.strip():
             continue
 
-        pdf.add_page()
-
-        # Section header bar
-        pdf.set_fill_color(240, 249, 255)
-        pdf.set_draw_color(14, 165, 233)
-        pdf.set_line_width(0.4)
-        x, y = pdf.get_x(), pdf.get_y()
-        pdf.rect(18, y, 174, 10, "FD")
-        pdf.set_font("Helvetica", "B", 13)
-        pdf.set_text_color(3, 105, 161)
-        pdf.set_xy(22, y + 1.5)
-        pdf.cell(170, 7, title)        # explicit width — keeps cursor predictable
-        pdf.ln(14)
-        pdf.set_x(pdf.l_margin)        # reset X to left margin before body text
-
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(30, 41, 59)
-        eff_w = pdf.w - pdf.l_margin - pdf.r_margin   # ~174 mm
+        color = SECTION_COLORS.get(title, (14, 165, 233))
         cleaned = _clean(content)
-        for para in cleaned.split("\n"):
-            para = para.strip()
-            if not para:
-                pdf.ln(3)
-                continue
-            try:
-                if para.startswith("*") or para.startswith("-"):
-                    pdf.set_x(22)
-                    pdf.multi_cell(eff_w - 4, 5.5, para)
-                else:
-                    pdf.set_x(pdf.l_margin)
-                    pdf.multi_cell(eff_w, 5.5, para)
-            except Exception:
-                # If a line still can't fit (e.g. a very long token), skip it
-                pdf.ln(3)
+        if not cleaned.strip():
+            continue
 
-    # ── Footer on every page ──
-    pdf.set_y(-14)
-    pdf.set_font("Helvetica", "I", 8)
-    pdf.set_text_color(148, 163, 184)
-    pdf.cell(0, 5, f"Wandr - AI Travel Planner  |  {dest_clean}  |  {now}", align="C")
+        pdf.add_page()
+        _draw_section_header(pdf, title, color)
+
+        pdf.set_font("Helvetica", "", 9.5)
+        pdf.set_text_color(30, 41, 59)
+
+        paragraphs = cleaned.split("\n")
+        for para in paragraphs:
+            raw = para.rstrip()
+            stripped = raw.strip()
+
+            if not stripped:
+                pdf.ln(2.5)
+                continue
+
+            # Day headers (Day 1 / Day 2 etc.)
+            if _is_day_header(stripped):
+                if pdf.get_y() > 255:
+                    pdf.add_page()
+                    _draw_section_header(pdf, title, color)
+                else:
+                    pdf.ln(2)
+                _draw_day_header(pdf, stripped, color)
+                pdf.set_font("Helvetica", "", 9.5)
+                pdf.set_text_color(30, 41, 59)
+                continue
+
+            # Bullet points — indent
+            if stripped.startswith(("-", "*", "+")):
+                bullet_text = stripped.lstrip("-*+ ").strip()
+                try:
+                    pdf.set_x(22)
+                    pdf.set_font("Helvetica", "", 9.5)
+                    pdf.cell(4, 5, "-", ln=False)
+                    pdf.set_x(26)
+                    pdf.multi_cell(eff_w - 12, 5, bullet_text)
+                except Exception:
+                    pdf.ln(3)
+                continue
+
+            # Sub-heading (ends with colon or all-caps short line)
+            if (stripped.endswith(":") and len(stripped) < 60) or (stripped.isupper() and len(stripped) < 50):
+                pdf.ln(2)
+                pdf.set_font("Helvetica", "B", 10)
+                r, g, b = color
+                pdf.set_text_color(r, g, b)
+                try:
+                    pdf.set_x(pdf.l_margin)
+                    pdf.multi_cell(eff_w, 5.5, stripped)
+                except Exception:
+                    pdf.ln(3)
+                pdf.set_font("Helvetica", "", 9.5)
+                pdf.set_text_color(30, 41, 59)
+                continue
+
+            # Normal paragraph
+            try:
+                pdf.set_x(pdf.l_margin)
+                pdf.multi_cell(eff_w, 5, stripped)
+            except Exception:
+                pdf.ln(3)
 
     return bytes(pdf.output())
 
@@ -1480,258 +1639,196 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "hotel_results
     m3.metric("Duration",      duration)
     m4.metric("Status",        status_label)
 
+    # ── Approval panel ABOVE tabs (visible from all tabs while waiting) ─────────
+    if st.session_state.get("waiting_for_approval"):
+        _apr_res = st.session_state.get("latest_result", {}) or {}
+        st.markdown(
+            '<div class="approval-box">'
+            '<div class="approval-title">Research complete — choose your preferences</div>'
+            '<div class="approval-sub">'
+            'We found transport, hotels, weather &amp; nearby attractions. '
+            'Browse the tabs below to review results, make your selections here, then generate.'
+            '</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        _tr = _apr_res.get("transport_results", "") or ""
+        _ht = _apr_res.get("hotel_results", "") or ""
+
+        def _transport_modes_found(text: str) -> list[str]:
+            t = text.lower()
+            modes = []
+            if any(k in t for k in ["flight", "airline", "airways", "airfare", "airport"]):
+                modes.append("Flight")
+            if any(k in t for k in ["train", "railway", "irctc", " express", "rajdhani", "shatabdi"]):
+                modes.append("Train")
+            if any(k in t for k in ["bus", "redbus", "abhibus", "volvo"]):
+                modes.append("Bus")
+            if any(k in t for k in ["drive", "highway", " cab", "ola", "uber"]):
+                modes.append("Self-drive / Car rental")
+            modes.append("No preference")
+            return modes if len(modes) > 1 else ["Flight", "Train", "Bus", "Self-drive / Car rental", "No preference"]
+
+        _transport_options = _transport_modes_found(_tr)
+        _ex1, _ex2 = st.columns(2)
+        with _ex1:
+            if _tr:
+                with st.expander("🚀 Transport options found — review", expanded=False):
+                    st.markdown(_tr[:3000] + ("…" if len(_tr) > 3000 else ""))
+        with _ex2:
+            if _ht:
+                with st.expander("🏨 Hotel options found — review", expanded=False):
+                    st.markdown(_ht[:2500] + ("…" if len(_ht) > 2500 else ""))
+
+        _c1, _c2 = st.columns(2)
+        with _c1:
+            ch_transport = st.radio(
+                f"Which transport mode? ({len(_transport_options)-1} found)",
+                _transport_options, horizontal=False,
+            )
+            ch_food = st.radio(
+                "Dietary preference?",
+                ["Vegetarian", "Non-vegetarian", "No preference"],
+                horizontal=False,
+                help="Vegetarian filters hotels & meals to pure-veg only.",
+            )
+        with _c2:
+            ch_hotel = st.radio(
+                "Hotel budget tier?",
+                ["Budget  (< Rs.2,000/night)", "Mid-range  (Rs.2,000–5,000)", "Premium  (Rs.5,000+)"],
+                horizontal=False,
+            )
+            ch_style = st.radio(
+                "Travel style?",
+                ["Explorer (lots of sightseeing)", "Relaxed (slow pace)", "Foodie (local cuisine focus)", "Cultural / Spiritual"],
+                horizontal=False,
+            )
+        ch_special = st.text_input(
+            "Any special requests? (optional)",
+            placeholder="Wheelchair access, halal food, honeymoon couple…",
+        )
+        if st.button("Generate My Personalised Itinerary", type="primary", use_container_width=True):
+            st.session_state["user_choices_display"] = {
+                "transport": ch_transport, "hotel": ch_hotel,
+                "food": ch_food, "style": ch_style, "special": ch_special,
+            }
+            with st.spinner("Crafting your personalised day-by-day plan…"):
+                _final_r = app.invoke(
+                    Command(resume={
+                        "transport": ch_transport, "hotel": ch_hotel,
+                        "food": ch_food, "style": ch_style, "special_requests": ch_special,
+                    }),
+                    config=config,
+                )
+            st.session_state["latest_result"]        = _final_r
+            st.session_state["waiting_for_approval"] = False
+            st.rerun()
+
+    # ── Tabs (research results) ───────────────────────────────────────────────
     tab_tr, tab_ht, tab_wx, tab_nb, tab_bud, tab_itin = st.tabs(
         ["🚀  Transport", "🏨  Hotels", "🌤️  Weather", "📍  Nearby", "💰  Budget", "📋  Itinerary"]
     )
     with tab_tr:
-        content = result.get("transport_results")
-        if content:
-            st.markdown(content)
+        _c = result.get("transport_results")
+        if _c:
+            st.markdown(_c)
         else:
-            st.markdown(
-                '<div class="tip-card"><div class="tip-card-text">Transport options — flights, trains, buses, and self-drive — will appear here. Make sure you entered a departure city in the "From" field.</div></div>',
-                unsafe_allow_html=True,
-            )
+            st.markdown('<div class="tip-card"><div class="tip-card-text">Transport options — flights, trains, buses, and self-drive — appear here. Enter a departure city in the "From" field.</div></div>', unsafe_allow_html=True)
     with tab_ht:
-        content = result.get("hotel_results")
-        if content:
-            st.markdown(content)
+        _c = result.get("hotel_results")
+        if _c:
+            st.markdown(_c)
         else:
-            st.markdown(
-                '<div class="tip-card"><div class="tip-card-text">Hotel recommendations were not included in this plan.</div></div>',
-                unsafe_allow_html=True,
-            )
+            st.markdown('<div class="tip-card"><div class="tip-card-text">Hotel recommendations will appear here.</div></div>', unsafe_allow_html=True)
     with tab_wx:
-        content = result.get("weather_results", "")
-        if content:
-            # If the content is still raw JSON (old cached trip), format it on the fly
-            if '"temperature_c"' in content or content.strip().lstrip("* \n").startswith("{"):
+        _c = result.get("weather_results", "")
+        if _c:
+            if '"temperature_c"' in _c or _c.strip().lstrip("* \n").startswith("{"):
                 import re as _re, json as _j
-                now_m = _re.search(r'\{[^{}]*"temperature_c"[^{}]*\}', content, _re.DOTALL)
-                fore_m = _re.search(r'\{[^{}]*"forecast".*?\}', content, _re.DOTALL)
-                if now_m or fore_m:
+                _nm = _re.search(r'\{[^{}]*"temperature_c"[^{}]*\}', _c, _re.DOTALL)
+                _fm = _re.search(r'\{[^{}]*"forecast".*?\}', _c, _re.DOTALL)
+                if _nm or _fm:
                     from agents import _fmt_weather
-                    content = _fmt_weather(
-                        now_m.group() if now_m else "{}",
-                        fore_m.group() if fore_m else "{}",
-                    )
-            st.markdown(content)
+                    _c = _fmt_weather(_nm.group() if _nm else "{}", _fm.group() if _fm else "{}")
+            st.markdown(_c)
         else:
-            st.markdown(
-                '<div class="tip-card"><div class="tip-card-text">Weather data will appear here once the destination is confirmed.</div></div>',
-                unsafe_allow_html=True,
-            )
+            st.markdown('<div class="tip-card"><div class="tip-card-text">Weather data will appear here once the destination is confirmed.</div></div>', unsafe_allow_html=True)
     with tab_nb:
-        content = result.get("nearby_results", "")
-        # Strip any <think>…</think> reasoning blocks
         import re as _re2
-        content = _re2.sub(r"<think>.*?</think>", "", content, flags=_re2.DOTALL | _re2.IGNORECASE).strip()
-        if content:
-            st.markdown(content)
+        _c = _re2.sub(r"<think>.*?</think>", "", result.get("nearby_results", ""), flags=_re2.DOTALL | _re2.IGNORECASE).strip()
+        if _c:
+            st.markdown(_c)
         else:
-            st.markdown(
-                '<div class="tip-card"><div class="tip-card-text">Nearby attractions (temples, waterfalls, parks, local food) will appear here once the destination is confirmed.</div></div>',
-                unsafe_allow_html=True,
-            )
+            st.markdown('<div class="tip-card"><div class="tip-card-text">Nearby attractions, local food & markets will appear here.</div></div>', unsafe_allow_html=True)
     with tab_bud:
-        content = result.get("budget_results")
-        if content:
-            st.markdown(content)
+        _c = result.get("budget_results")
+        if _c:
+            st.markdown(_c)
         else:
-            st.markdown(
-                '<div class="tip-card"><div class="tip-card-text">Budget breakdown was not included. Mention your budget in the request for a cost estimate.</div></div>',
-                unsafe_allow_html=True,
-            )
+            st.markdown('<div class="tip-card"><div class="tip-card-text">Budget breakdown will appear here. Mention your budget in the request for a cost estimate.</div></div>', unsafe_allow_html=True)
+
+    # ── Itinerary tab — shows final plan after generation ──────────────────────
     with tab_itin:
-        content = result.get("itinerary")
-        if content:
-            st.markdown(content)
+        _final = st.session_state.get("latest_result") or {}
+        if _final.get("final_response"):
+            _dest_lbl = (_final.get("trip_constraints") or {}).get("destination", "your destination")
+
+            # Non-editable choices summary
+            _uch = _final.get("user_choices") or st.session_state.get("user_choices_display") or {}
+            if _uch:
+                _pils = "".join(
+                    f'<span class="pref-pill"><b>{lbl}:</b> {val}</span>'
+                    for lbl, val in [
+                        ("Transport", _uch.get("transport","")),
+                        ("Hotel",     _uch.get("hotel","")),
+                        ("Food",      _uch.get("food","")),
+                        ("Style",     _uch.get("style","")),
+                    ] if val
+                )
+                _sp = _uch.get("special_requests") or _uch.get("special","")
+                if _sp:
+                    _pils += f'<span class="pref-pill"><b>Special:</b> {_sp}</span>'
+                st.markdown(
+                    f'<div class="prefs-panel" style="margin-top:0;margin-bottom:1rem;padding:1rem 1.4rem">'
+                    f'<div class="prefs-panel-title" style="font-size:0.85rem;margin-bottom:0.5rem">Your confirmed preferences</div>'
+                    f'<div class="prefs-choices">{_pils}</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown(
+                f'<div class="final-header">'
+                f'<div class="final-title">Your Complete Travel Plan — {_dest_lbl}</div>'
+                f'<div class="final-sub">Personalised itinerary · transport · hotels · weather · budget · what to say</div>'
+                f'</div>', unsafe_allow_html=True,
+            )
+            st.markdown(_final["final_response"])
+            st.divider()
+
+            _col_pdf, _col_share = st.columns([3, 2])
+            with _col_pdf:
+                st.download_button(
+                    label="Download PDF",
+                    data=_build_pdf_bytes(_final),
+                    file_name=f"wandr_{_dest_lbl.replace(' ','_').lower()}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
+            with _col_share:
+                if st.button("Get Share Link", use_container_width=True):
+                    _sh_state = {k: _final.get(k, "") for k in (
+                        "user_query", "trip_constraints", "transport_results",
+                        "hotel_results", "weather_results", "nearby_results",
+                        "budget_results", "itinerary", "itinerary_json", "final_response",
+                    )}
+                    _sid = auth.create_share(username, _sh_state)
+                    st.session_state["share_url"] = f"https://wandr-ai.streamlit.app/?share={_sid}"
+                    st.session_state["share_id"]  = _sid
+            if st.session_state.get("share_url"):
+                st.success("Share link ready — copy below and send to anyone:")
+                st.code(st.session_state["share_url"], language=None)
+                st.caption("Anyone with this link can view your plan — no login needed.")
+
+        elif _final.get("itinerary"):
+            st.markdown(_final["itinerary"])
         elif st.session_state.get("waiting_for_approval"):
-            st.markdown(
-                '<div class="tip-card"><div class="tip-card-text">'
-                '📋 Research complete! Scroll down to the <b style="color:#0ea5e9">review panel</b> '
-                'below — choose your transport, hotel &amp; style, then click Generate to build your itinerary.'
-                '</div></div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                '<div class="tip-card"><div class="tip-card-text">The day-by-day itinerary will appear here after you review and confirm your preferences.</div></div>',
-                unsafe_allow_html=True,
-            )
-
-
-# ── Human Approval panel — Review results & choose preferences ────────────────
-if st.session_state.get("waiting_for_approval"):
-    st.divider()
-    _res = st.session_state.get("latest_result", {}) or {}
-
-    st.markdown(
-        '<div class="approval-box">'
-        '<div class="approval-title">✅ Research complete — choose your preferences</div>'
-        '<div class="approval-sub">'
-        'We found transport options, hotels, weather &amp; nearby attractions. '
-        'Review the tabs above, make your selections below, and we will craft your personalised itinerary.'
-        '</div>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
-    # ── Context snippets from agent results ──────────────────────────────────
-    _tr = _res.get("transport_results", "") or ""
-    _ht = _res.get("hotel_results", "") or ""
-
-    # Detect which transport modes were actually found
-    def _transport_modes_found(text: str) -> list[str]:
-        t = text.lower()
-        modes = []
-        if any(k in t for k in ["flight", "airline", "airways", "airfare", "airport"]):
-            modes.append("Flight")
-        if any(k in t for k in ["train", "railway", "irctc", " express", "rajdhani", "shatabdi"]):
-            modes.append("Train")
-        if any(k in t for k in ["bus", "redbus", "abhibus", "volvo"]):
-            modes.append("Bus")
-        if any(k in t for k in ["drive", "highway", "km", " cab", "ola", "uber"]):
-            modes.append("Self-drive / Car rental")
-        modes.append("No preference")
-        return modes if len(modes) > 1 else ["Flight", "Train", "Bus", "Self-drive / Car rental", "No preference"]
-
-    _transport_options = _transport_modes_found(_tr)
-
-    if _tr:
-        with st.expander("🚀 View transport options found (flights, trains, buses)", expanded=False):
-            st.markdown(_tr[:3000] + ("…" if len(_tr) > 3000 else ""))
-
-    if _ht:
-        with st.expander("🏨 View hotel options found", expanded=False):
-            st.markdown(_ht[:2500] + ("…" if len(_ht) > 2500 else ""))
-
-    # ── Choice inputs ──────────────────────────────────────────────────────
-    c1, c2 = st.columns(2)
-    with c1:
-        ch_transport = st.radio(
-            f"🚀  Which transport mode suits you? ({len(_transport_options)-1} found)",
-            _transport_options,
-            horizontal=False,
-        )
-        ch_food = st.radio(
-            "🍽️  Dietary preference?",
-            ["Vegetarian 🌿", "Non-vegetarian", "No preference"],
-            horizontal=False,
-            help="Selecting Vegetarian will filter hotels and restaurants to veg-friendly options only.",
-        )
-    with c2:
-        ch_hotel = st.radio(
-            "🏨  Hotel budget tier?",
-            ["Budget  (< Rs.2,000/night)", "Mid-range  (Rs.2,000–5,000)", "Premium  (Rs.5,000+)"],
-            horizontal=False,
-        )
-        ch_style = st.radio(
-            "🗺️  Travel style?",
-            ["Explorer (lots of sightseeing)", "Relaxed (slow pace)", "Foodie (local cuisine focus)", "Cultural / Spiritual"],
-            horizontal=False,
-        )
-
-    ch_special = st.text_input(
-        "💬  Any special requests? (optional)",
-        placeholder="E.g. wheelchair access, avoid stairs, halal food, honeymoon couple, anniversary trip…",
-    )
-
-    if st.button("🗺️  Generate My Personalised Itinerary", type="primary", use_container_width=True):
-        # Store choices in session so we can show them in the final view
-        st.session_state["user_choices_display"] = {
-            "transport": ch_transport,
-            "hotel":     ch_hotel,
-            "food":      ch_food,
-            "style":     ch_style,
-            "special":   ch_special,
-        }
-        with st.spinner("✨  Crafting your personalised day-by-day plan…"):
-            final = app.invoke(
-                Command(resume={
-                    "transport":        ch_transport,
-                    "hotel":            ch_hotel,
-                    "food":             ch_food,
-                    "style":            ch_style,
-                    "special_requests": ch_special,
-                }),
-                config=config,
-            )
-        st.session_state["latest_result"]        = final
-        st.session_state["waiting_for_approval"] = False
-        st.rerun()
-
-
-# ── Final plan ────────────────────────────────────────────────────────────────
-final = st.session_state.get("latest_result")
-if final and final.get("final_response"):
-    st.divider()
-
-    dest_label = (final.get("trip_constraints") or {}).get("destination", "your destination")
-    st.markdown(
-        f'<div class="final-header">'
-        f'<div class="final-title">🎉 Your Complete Travel Plan — {dest_label}</div>'
-        f'<div class="final-sub">Personalised itinerary with flights, hotels, weather & budget breakdown</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    # ── Non-editable choices summary ─────────────────────────────────────────
-    _choices = (
-        final.get("user_choices")
-        or st.session_state.get("user_choices_display")
-        or {}
-    )
-    if _choices:
-        _pill_items = [
-            ("🚀 Transport", _choices.get("transport") or _choices.get("transport", "")),
-            ("🏨 Hotel",     _choices.get("hotel", "")),
-            ("🍽️ Food",     _choices.get("food", "")),
-            ("🗺️ Style",    _choices.get("style", "")),
-        ]
-        _pills_html = "".join(
-            f'<span class="pref-pill"><b>{lbl}:</b> {val}</span>'
-            for lbl, val in _pill_items if val
-        )
-        _special = _choices.get("special_requests") or _choices.get("special", "")
-        if _special:
-            _pills_html += f'<span class="pref-pill"><b>📝 Special:</b> {_special}</span>'
-        st.markdown(
-            f'<div class="prefs-panel" style="margin-top:0;margin-bottom:1rem;padding:1rem 1.4rem">'
-            f'<div class="prefs-panel-title" style="font-size:0.85rem;margin-bottom:0.5rem">Your confirmed preferences</div>'
-            f'<div class="prefs-choices">{_pills_html}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-    st.markdown(final["final_response"])
-
-    col_pdf, col_share = st.columns([3, 2])
-
-    with col_pdf:
-        st.download_button(
-            label="📄  Download PDF",
-            data=_build_pdf_bytes(final),
-            file_name=f"travel_plan_{dest_label.replace(' ', '_').lower()}.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-        )
-
-    with col_share:
-        if st.button("🔗  Get Share Link", use_container_width=True):
-            _share_state = {k: final.get(k, "") for k in (
-                "user_query", "trip_constraints", "flight_results", "transport_results",
-                "hotel_results", "weather_results", "nearby_results", "budget_results",
-                "itinerary", "itinerary_json", "final_response",
-            )}
-            _sid = auth.create_share(username, _share_state)
-            _share_url = f"?share={_sid}"
-            st.session_state["share_url"] = _share_url
-            st.session_state["share_id"]  = _sid
-
-    if st.session_state.get("share_url"):
-        st.success(
-            f"🔗 **Share link created!** Anyone with this link can view your plan (no login needed):\n\n"
-            f"`{st.session_state['share_url']}`\n\n"
-            f"*(Copy the URL above and share it — or append it to your Wandr domain)*"
-        )
+            st.info("Use the panel above the tabs to set your preferences, then click Generate.")

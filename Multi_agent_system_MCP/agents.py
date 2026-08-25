@@ -696,9 +696,15 @@ B) LOCAL FOOD — top 5–8 must-try local dishes/street food with where to find
 
 C) LOCAL MARKETS — 2–3 popular markets/bazaars, known for, best time to visit.
 
-D) NEARBY ATTRACTIONS (within ~100 km of destination) — temples, waterfalls,
-   historic sites, parks, viewpoints. For each: name, distance, entry fee,
-   ideal visit duration, best time.
+D) NEARBY ATTRACTIONS & LOCAL EXPERIENCES — CRITICAL: Use the ACTUAL places from the
+   pre-fetched nearby data. Include them in the day-by-day plan.
+   - Plan each day around 2-3 specific real places found in the nearby data (temples, markets, viewpoints)
+   - LOCAL FOOD: For every meal slot, suggest a specific local dish AND where to find it
+     (use actual restaurant/stall names from the nearby data)
+   - FAMOUS LOCAL MARKETS: Include at least 1 market visit per trip. Name the market, what's sold,
+     best time, bargaining tips specific to that market
+   - For each attraction: name, distance, entry fee, ideal visit duration, best time
+   - Group geographically close attractions together in the same day
 
 E) TRANSPORT — use data from pre-fetched transport results (includes flights, trains, buses).
 
@@ -746,9 +752,14 @@ F) WHAT TO SAY & DO — Practical Conversation Guide (ALWAYS INCLUDE, very valua
 ITINERARY RULES
 ═══════════════════════════════
 - Build a DAY-WISE plan: arrival → hotel check-in → each day → departure.
+- CRITICAL: Use actual place names from the nearby attractions data for each day's activities.
+  Do NOT invent generic place names — use what was actually found in the research.
 - Group nearby attractions to minimise travel. Balance must-see + offbeat.
 - Show time slots, estimated travel time between stops, cost per activity.
-- Breakfast / lunch / dinner suggestions every day.
+- Breakfast / lunch / dinner: name a SPECIFIC local dish AND WHERE to eat it every day.
+  Use real restaurant/stall names from the nearby data wherever possible.
+- Include at least ONE famous local market visit in the itinerary.
+  Describe what to buy, when to go, and how to bargain there.
 
 ═══════════════════════════════
 BUDGET RULES
@@ -827,8 +838,8 @@ USER CHOICES (apply strictly):
 ═══ WEATHER DATA ═══
 {state.get('weather_results', 'Not fetched.')}
 
-═══ NEARBY ATTRACTIONS DATA ═══
-{state.get('nearby_results', 'Not fetched.')[:2000]}
+═══ NEARBY ATTRACTIONS, LOCAL FOOD & MARKETS DATA (USE for day-by-day planning) ═══
+{state.get('nearby_results', 'Not fetched.')[:4500]}
 
 ═══ BUDGET ANALYSIS ═══
 {state.get('budget_results', 'Not fetched.')}
