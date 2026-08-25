@@ -64,7 +64,7 @@ GROQ_FALLBACKS = [
 ]
 
 _PREFER_KEYWORDS  = ["70b", "maverick", "scout", "versatile", "qwq", "deepseek", "compound"]
-_EXCLUDE_KEYWORDS = ["embed", "whisper", "guard", "tts", "vision"]
+_EXCLUDE_KEYWORDS = ["embed", "whisper", "guard", "tts", "vision", "orpheus", "allam", "canopylabs"]
 _SMALL_KEYWORDS   = ["8b", "7b", "9b", "gemma2", "3b", "1b"]  # avoid for complex tasks
 
 

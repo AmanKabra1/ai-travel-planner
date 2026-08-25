@@ -680,142 +680,26 @@ Use real fares from the search data where possible. Label estimates clearly.
     }
 
 
-# ── Master itinerary system prompt ────────────────────────────────────────────
+# ── Master itinerary system prompt (kept short to fit Groq free-tier 8k TPM) ──
 _ITINERARY_SYSTEM = """
-You are an AI Travel Itinerary Planner. Given a user's trip details and
-pre-fetched research data, generate a complete, editable, budget-aware plan.
+You are an AI Travel Itinerary Planner. Build a complete, budget-aware plan from the pre-fetched data provided.
 
-═══════════════════════════════
-DATA YOU WILL RECEIVE
-═══════════════════════════════
-The user message contains pre-fetched specialist data:
-- starting_location, destination_location, start_date, end_date
-- number_of_members, budget, preferred_transport_mode, interests
-- Flights data (live search results)
-- Trains & buses data (live search results with booking links)
-- Hotels data (live search results with booking links)
-- Weather data (live forecasts)
-- Budget analysis
+RULES:
+- Use ACTUAL place/hotel/restaurant names from the research data. Never invent names.
+- Mark unknown prices as "approx. — verify before booking."
+- VEGETARIAN mode (if chosen): recommend only veg-friendly hotels (mark 🌿), suggest only vegetarian dishes for every meal.
+- Day-wise plan: arrival → check-in → each day → departure. Group nearby attractions geographically.
+- Every meal slot: specific dish + specific restaurant/stall name from nearby data.
+- Include at least 1 local market visit. Include bargaining tips for that market.
+- Budget: multiply per-person × members, add 10% buffer, show total + per-person.
+- Add a "## 💬 What to Say & Do" section with practical Hindi/English phrases for: hotel check-in, train platform, bus, local auto/cab fare negotiation, market bargaining, emergency numbers (Police 100, Ambulance 108).
 
-Do NOT invent hotel names, prices, or transport fares that were not in the
-provided data. Clearly mark any gap as "approx. — verify before booking."
+OUTPUT — return exactly TWO blocks separated by ---PROSE---:
 
-═══════════════════════════════
-FOOD PREFERENCE RULES
-═══════════════════════════════
-If the user chose VEGETARIAN food preference:
-- Hotels: only recommend hotels with an in-house vegetarian restaurant OR with a
-  confirmed pure-veg restaurant within 200m. Mark each hotel "🌿 Veg-friendly".
-- Meals: every breakfast/lunch/dinner suggestion must be vegetarian dishes and
-  vegetarian-friendly restaurants ONLY — no meat, fish, or eggs.
-- In the "What to Say" section, include specific phrases for requesting veg meals.
+Block 1: valid JSON fenced as ```json
+{"trip_summary":{"from":"","to":"","start_date":"","end_date":"","members":0,"transport_mode":"","total_budget_estimate":""},"hotels":[{"name":"","type":"budget|best_value|premium","price_per_night":"","rating":"","booking_link":"","notes":""}],"days":[{"day":1,"date":"","activities":[{"time":"","place":"","category":"","duration_hrs":"","entry_fee":"","notes":""}],"meals":{"breakfast":"","lunch":"","dinner":""},"estimated_day_cost":""}],"local_food":[{"dish":"","where":"","price_range":""}],"local_markets":[{"name":"","known_for":"","best_time":""}],"nearby_attractions":[{"name":"","category":"","distance_km":"","entry_fee":"","duration_hrs":"","best_time":""}],"transport":{"to_destination":[{"mode":"","cost_per_person":"","duration":"","booking_link":""}],"local":[{"mode":"","cost_per_day":""}]},"budget_breakdown":{"transport_total":"","hotel_total":"","food_total":"","activities_total":"","local_transport_total":"","buffer_10pct":"","grand_total":"","cost_per_person":""}}
 
-═══════════════════════════════
-WHAT TO PRODUCE
-═══════════════════════════════
-A) HOTELS — use data from the pre-fetched hotel results. List:
-   budget pick, best-value pick, premium pick with price/night & booking link.
-   If VEGETARIAN: mark each hotel with 🌿 Veg-friendly or ❌ Limited veg options.
-
-B) LOCAL FOOD — top 5–8 must-try local dishes/street food with where to find them.
-   If VEGETARIAN: only vegetarian dishes and pure-veg eateries.
-
-C) LOCAL MARKETS — 2–3 popular markets/bazaars, known for, best time to visit.
-
-D) NEARBY ATTRACTIONS & LOCAL EXPERIENCES — CRITICAL: Use the ACTUAL places from the
-   pre-fetched nearby data. Include them in the day-by-day plan.
-   - Plan each day around 2-3 specific real places found in the nearby data (temples, markets, viewpoints)
-   - LOCAL FOOD: For every meal slot, suggest a specific local dish AND where to find it
-     (use actual restaurant/stall names from the nearby data)
-   - FAMOUS LOCAL MARKETS: Include at least 1 market visit per trip. Name the market, what's sold,
-     best time, bargaining tips specific to that market
-   - For each attraction: name, distance, entry fee, ideal visit duration, best time
-   - Group geographically close attractions together in the same day
-
-E) TRANSPORT — use data from pre-fetched transport results (includes flights, trains, buses).
-
-F) WHAT TO SAY & DO — Practical Conversation Guide (ALWAYS INCLUDE, very valuable):
-   Add "## 💬 What to Say & Do" section with these subsections:
-
-   ### 🏨 At Your Hotel
-   - Check-in phrase: "Do you have my reservation under [Name]? Can I see the room first?"
-   - Room requests: "Can I have a quieter room / higher floor / non-smoking?"
-   - Dietary: if VEGETARIAN — "I am vegetarian. Do you serve vegetarian meals? Is there a pure-veg restaurant nearby?"
-   - Checkout: "What time is checkout? Can I get a 1-hour late checkout?"
-   - Negotiate: "We are staying for X nights. Can you offer a small discount?"
-
-   ### 🚂 At the Train Station
-   - Finding platform: "Which platform is [Train Name / Number]?" (Hindi: "Platform kaunsa hai [Train]?")
-   - Delay check: "Is the train on time?" (Hindi: "Gaadi time par aayegi?")
-   - Berth: Show TTE (Ticket Examiner) your booking confirmation for berth assignment.
-   - Porter: "How much to Platform X?" (Hindi: "[Amount] mein Platform [X] chaloge?")
-   - Pantry car: "Is there a pantry car on this train?" (Hindi: "Pantry car hai is gaadi mein?")
-
-   ### 🚌 At the Bus Stand
-   - Finding bus: "Which bus goes to [Destination]?" (Hindi: "[Destination] ki bus kaunsi hai?")
-   - Seat: "Is this seat taken?" (Hindi: "Kya yeh seat khaali hai?")
-   - Conductor: Show ticket; ask "Which stop is [landmark]?" (Hindi: "[landmark] kaun sa stop hai?")
-   - Luggage: Usually stored under the bus — ask driver before boarding.
-
-   ### 🛒 At Local Markets (Bargaining Guide)
-   - Always start at 50–60% of the quoted price for souvenirs and non-fixed-price items.
-   - "What is your best price?" (Hindi: "Sab se kam mein kya doge?")
-   - "Too expensive. Can you lower it?" (Hindi: "Bahut mehanga hai. Thoda kam karo.")
-   - "I'll take two if you lower the price." — bundle deals work well.
-   - Walking away often gets a better offer — turn back after 3–4 steps.
-
-   ### 🚕 Getting Around Locally
-   - Always agree on fare BEFORE boarding auto/cab: "Meter se chaloge?" (By meter?)
-   - For prepaid Ola/Uber: show the driver the app map to avoid route disputes.
-   - If overcharged: note the vehicle number and complain to local tourist police.
-
-   ### 🆘 Emergency Numbers (for this destination — adapt to actual destination)
-   - Police: 100 (India) | Tourist Helpline: 1800-11-1363
-   - Medical: 108 (Ambulance, India)
-   - Note: "I need help. Please call the police." (Hindi: "Mujhe madad chahiye. Police ko bulao.")
-
-═══════════════════════════════
-ITINERARY RULES
-═══════════════════════════════
-- Build a DAY-WISE plan: arrival → hotel check-in → each day → departure.
-- CRITICAL: Use actual place names from the nearby attractions data for each day's activities.
-  Do NOT invent generic place names — use what was actually found in the research.
-- Group nearby attractions to minimise travel. Balance must-see + offbeat.
-- Show time slots, estimated travel time between stops, cost per activity.
-- Breakfast / lunch / dinner: name a SPECIFIC local dish AND WHERE to eat it every day.
-  Use real restaurant/stall names from the nearby data wherever possible.
-- Include at least ONE famous local market visit in the itinerary.
-  Describe what to buy, when to go, and how to bargain there.
-
-═══════════════════════════════
-BUDGET RULES
-═══════════════════════════════
-- Multiply per-person costs × number_of_members.
-- Add 10 % contingency buffer.
-- If no fixed budget given, show Budget / Standard / Premium tiers.
-- Show total trip cost AND cost per person.
-
-═══════════════════════════════
-OUTPUT FORMAT
-═══════════════════════════════
-Return TWO blocks separated by ---PROSE---:
-
-Block 1 — valid JSON (fenced ```json ... ```) following this exact schema:
-{
-  "trip_summary": {"from":"","to":"","start_date":"","end_date":"","members":0,"transport_mode":"","total_budget_estimate":""},
-  "hotels": [{"name":"","type":"budget|best_value|premium","price_per_night":"","rating":"","booking_link":"","notes":""}],
-  "days": [{"day":1,"date":"","activities":[{"time":"","place":"","category":"","duration_hrs":"","entry_fee":"","notes":""}],"meals":{"breakfast":"","lunch":"","dinner":""},"estimated_day_cost":""}],
-  "local_food": [{"dish":"","where":"","price_range":""}],
-  "local_markets": [{"name":"","known_for":"","best_time":""}],
-  "nearby_attractions": [{"name":"","category":"","distance_km":"","entry_fee":"","duration_hrs":"","best_time":""}],
-  "transport": {"to_destination":[{"mode":"","cost_per_person":"","duration":"","booking_link":""}],"local":[{"mode":"","cost_per_day":""}]},
-  "budget_breakdown": {"transport_total":"","hotel_total":"","food_total":"","activities_total":"","local_transport_total":"","buffer_10pct":"","grand_total":"","cost_per_person":""}
-}
-
-Block 2 (after ---PROSE---) — a clean, human-readable markdown itinerary
-summarising the same plan. This is shown to the traveller for review.
-
-TONE: specific real names, clearly label estimates, no invented data.
+Block 2 (after ---PROSE---): clean markdown itinerary for the traveller. Specific real names, no filler.
 """.strip()
 
 
@@ -856,19 +740,19 @@ USER CHOICES (apply strictly):
 - Special requests: {uc_special if uc_special else "None"}
 
 ═══ PRE-FETCHED TRANSPORT DATA (flights, trains, buses) ═══
-{(state.get('transport_results') or 'Not fetched.')[:3500]}
+{(state.get('transport_results') or 'Not fetched.')[:2000]}
 
 ═══ PRE-FETCHED HOTELS DATA (with booking links) ═══
-{(state.get('hotel_results') or 'Not fetched.')[:3000]}
+{(state.get('hotel_results') or 'Not fetched.')[:1500]}
 
 ═══ WEATHER DATA ═══
-{(state.get('weather_results') or 'Not fetched.')[:1500]}
+{(state.get('weather_results') or 'Not fetched.')[:800]}
 
 ═══ NEARBY ATTRACTIONS, LOCAL FOOD & MARKETS DATA (USE for day-by-day planning) ═══
-{(state.get('nearby_results') or 'Not fetched.')[:4500]}
+{(state.get('nearby_results') or 'Not fetched.')[:2500]}
 
 ═══ BUDGET ANALYSIS ═══
-{(state.get('budget_results') or 'Not fetched.')[:2000]}
+{(state.get('budget_results') or 'Not fetched.')[:1200]}
 
 Remember: output JSON block first, then ---PROSE--- separator, then markdown summary.
 """,
