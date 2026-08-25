@@ -518,6 +518,32 @@ button[kind="header"]               { display: none !important; }
 """, unsafe_allow_html=True)
 
 
+# ── Tab content cleaner ───────────────────────────────────────────────────────
+def _clean_tab(text: str, max_chars: int = 4000) -> str:
+    """Remove runaway repetition and cap length for tab display."""
+    if not text:
+        return text
+    # Detect repetition: same 120-char window appearing 3+ times → cut before 3rd
+    window = 120
+    t = text
+    for i in range(0, min(len(t) - window * 3, 2000), 60):
+        chunk = t[i : i + window]
+        p1 = t.find(chunk, i + window)
+        if p1 != -1:
+            p2 = t.find(chunk, p1 + window)
+            if p2 != -1:
+                t = t[: max(i + window, p1 - 5)].rstrip()
+                t += "\n\n> *Repetitive content removed. Full data is used for the itinerary.*"
+                break
+    # Length cap
+    if len(t) > max_chars:
+        cut = t.rfind("\n", 0, max_chars)
+        if cut < max_chars // 2:
+            cut = max_chars
+        t = t[:cut].rstrip() + "\n\n> *Display trimmed. Full data is used for the itinerary.*"
+    return t
+
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 _PIPELINE = [
     ("🗺️", "Planning",   "supervisor_reasoning"),
@@ -1804,13 +1830,13 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "hotel_results
         ["🚀  Transport", "🏨  Hotels", "🌤️  Weather", "📍  Nearby", "💰  Budget", "📋  Itinerary"]
     )
     with tab_tr:
-        _c = result.get("transport_results")
+        _c = _clean_tab(result.get("transport_results") or "")
         if _c:
             st.markdown(_c)
         else:
             st.markdown('<div class="tip-card"><div class="tip-card-text">Transport options — flights, trains, buses, and self-drive — appear here. Enter a departure city in the "From" field.</div></div>', unsafe_allow_html=True)
     with tab_ht:
-        _c = result.get("hotel_results")
+        _c = _clean_tab(result.get("hotel_results") or "")
         if _c:
             st.markdown(_c)
         else:
@@ -1825,18 +1851,18 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "hotel_results
                 if _nm or _fm:
                     from agents import _fmt_weather
                     _c = _fmt_weather(_nm.group() if _nm else "{}", _fm.group() if _fm else "{}")
-            st.markdown(_c)
+            st.markdown(_clean_tab(_c))
         else:
             st.markdown('<div class="tip-card"><div class="tip-card-text">Weather data will appear here once the destination is confirmed.</div></div>', unsafe_allow_html=True)
     with tab_nb:
         import re as _re2
         _c = _re2.sub(r"<think>.*?</think>", "", result.get("nearby_results", ""), flags=_re2.DOTALL | _re2.IGNORECASE).strip()
         if _c:
-            st.markdown(_c)
+            st.markdown(_clean_tab(_c))
         else:
             st.markdown('<div class="tip-card"><div class="tip-card-text">Nearby attractions, local food & markets will appear here.</div></div>', unsafe_allow_html=True)
     with tab_bud:
-        _c = result.get("budget_results")
+        _c = _clean_tab(result.get("budget_results") or "")
         if _c:
             st.markdown(_c)
         else:

@@ -261,7 +261,7 @@ def hotel_agent(state: TravelState):
         search_text = "Live search unavailable."
 
     result = _llm_text(
-        "You are a hotel recommendation specialist.",
+        "You are a hotel recommendation specialist. Write each section ONCE only. Stop after listing all hotels.",
         f"""Based on these web search results, recommend the best hotels and areas to stay.
 
 User request:
@@ -275,7 +275,7 @@ Return a clean, readable markdown summary:
 - List 2–4 specific hotels per area with name, price range, vibe
 - For each hotel, include the booking/source link as a Markdown hyperlink like [Hotel Name](URL)
 - Include one direct booking site link per hotel where available (Booking.com, Hotels.com, Agoda, etc.)
-Do not output raw JSON.
+Do not output raw JSON. Write each section ONCE. Stop after all hotels are listed.
 """,
     )
 
@@ -306,7 +306,7 @@ def transport_agent(state: TravelState):
     )
 
     result = _llm_text(
-        "You are a comprehensive transport specialist covering flights, trains, buses, and road travel. Always show real schedules, fares, and booking links.",
+        "You are a comprehensive transport specialist. Write each section ONCE only. End your response after the '## 💡 Best Option by Budget' section. Never repeat headings or bullet points.",
         f"""Provide a comprehensive transport guide for this route covering ALL modes of transport.
 
 User request: {state['user_query']}
@@ -615,7 +615,7 @@ def budget_agent(state: TravelState):
             logger.warning("Budget price search failed: %s", exc)
 
     result = _llm_text(
-        "You are a precise travel budget analyst. Always show per-person AND total-party costs.",
+        "You are a precise travel budget analyst. Write each section ONCE only. Never repeat category names. End after the Feasibility paragraph. No extra text after that.",
         f"""Build a detailed 2026 budget breakdown for this trip.
 
 User request: {state['user_query']}
