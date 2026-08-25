@@ -53,9 +53,11 @@ def route_after_agent(current_agent: str):
         selected = _selected_agents(state)
         current_index = AGENT_ORDER.index(current_agent)
         for next_agent in AGENT_ORDER[current_index + 1:]:
-            if next_agent in selected:
+            # Skip itinerary_agent — it runs AFTER human_approval
+            if next_agent in selected and next_agent != "itinerary_agent":
                 return next_agent
-        return "itinerary_agent"
+        # All research agents done → pause for user choices
+        return "human_approval"
     return route
 
 
@@ -81,8 +83,9 @@ def build_graph():
     graph.add_conditional_edges("weather_agent",    route_after_agent("weather_agent"),   ROUTE_MAP)
     graph.add_conditional_edges("nearby_agent",     route_after_agent("nearby_agent"),    ROUTE_MAP)
     graph.add_conditional_edges("budget_agent",     route_after_agent("budget_agent"),    ROUTE_MAP)
-    graph.add_edge("itinerary_agent", "human_approval")
-    graph.add_edge("human_approval",  "final_response")
+    # human_approval fires BEFORE itinerary so user choices shape the plan
+    graph.add_edge("human_approval",  "itinerary_agent")
+    graph.add_edge("itinerary_agent", "final_response")
     graph.add_edge("final_response",  END)
 
     if DATABASE_URL:

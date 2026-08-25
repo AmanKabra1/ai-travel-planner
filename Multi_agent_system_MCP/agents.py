@@ -702,7 +702,14 @@ TONE: specific real names, clearly label estimates, no invented data.
 
 def itinerary_agent(state: TravelState):
     logger.info("Itinerary agent running")
-    constraints = state.get("trip_constraints", {})
+    constraints   = state.get("trip_constraints", {})
+    user_choices  = state.get("user_choices") or {}
+
+    uc_transport = user_choices.get("transport", constraints.get("transport_mode", "Mixed"))
+    uc_hotel     = user_choices.get("hotel",     "Mid-range")
+    uc_food      = user_choices.get("food",      "No preference")
+    uc_style     = user_choices.get("style",     "Explorer")
+    uc_special   = user_choices.get("special_requests", "")
 
     result = _llm_text(
         _ITINERARY_SYSTEM,
@@ -715,7 +722,11 @@ Trip details:
 - End date: {constraints.get('end_date', 'Not specified')}
 - Travellers: {constraints.get('members', 2)}
 - Budget: {constraints.get('budget', 'Not specified')}
-- Transport preference: {constraints.get('transport_mode', 'Mixed')}
+- Transport preference (USER CHOSE): {uc_transport}
+- Hotel tier (USER CHOSE): {uc_hotel}
+- Food preference (USER CHOSE): {uc_food}
+- Travel style (USER CHOSE): {uc_style}
+- Special requests: {uc_special if uc_special else 'None'}
 - Interests: {constraints.get('interests', [])}
 
 User's full request:
@@ -780,23 +791,25 @@ Remember: output JSON block first, then ---PROSE--- separator, then markdown sum
 # ── Human approval node ───────────────────────────────────────────────────────
 
 def human_approval_agent(state: TravelState):
-    logger.info("Human approval — waiting for user input via interrupt()")
+    """Pause after all research agents so the user can review findings and
+    choose their transport, hotel tier, food and style preferences before
+    the itinerary is generated."""
+    logger.info("Human approval — waiting for user choices")
 
-    feedback = interrupt({
-        "question":           "Do you approve this itinerary?",
-        "draft_itinerary":    state.get("itinerary", ""),
-        "approval_request":   state.get("approval_request", ""),
-        "expected_response":  {"approved": True, "feedback": "Optional revision notes"},
+    choices = interrupt({
+        "type":              "user_choices",
+        "flight_results":    state.get("flight_results", ""),
+        "transport_results": state.get("transport_results", ""),
+        "hotel_results":     state.get("hotel_results", ""),
+        "budget_results":    state.get("budget_results", ""),
     })
 
-    approved       = feedback.get("approved", True)
-    human_feedback = feedback.get("feedback", "")
-    logger.info("Human decision — approved=%s", approved)
-
+    logger.info("User choices received: %s", choices)
     return {
-        "approved":      approved,
-        "human_feedback": human_feedback,
-        "messages":      [AIMessage(content="Human approval step completed.")],
+        "user_choices":   choices,
+        "human_feedback": choices.get("special_requests", ""),
+        "approved":       True,
+        "messages":       [AIMessage(content="User choices collected.")],
     }
 
 

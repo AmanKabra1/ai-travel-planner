@@ -24,6 +24,7 @@ class TravelState(TypedDict, total=False):
     approval_request: str
     human_feedback: str
     approved: bool
+    user_choices: dict[str, Any]   # transport, hotel, food, style, special_requests
 
     final_response: str
     llm_calls: int
