@@ -519,7 +519,7 @@ button[kind="header"]               { display: none !important; }
 
 
 # ── Tab content cleaner ───────────────────────────────────────────────────────
-def _clean_tab(text: str, max_chars: int = 4000) -> str:
+def _clean_tab(text: str, max_chars: int = 10000) -> str:
     """Remove runaway repetition and cap length for tab display."""
     if not text:
         return text

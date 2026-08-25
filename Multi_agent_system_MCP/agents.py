@@ -49,12 +49,15 @@ def _llm_text(system: str, prompt: str) -> str:
         try:
             result = gemini.invoke(msgs)
             raw = result.content if hasattr(result, "content") else str(result)
-            # Gemini may return a list of content blocks
+            # Gemini 3.6-flash returns a list of typed content blocks; join with
+            # newlines to preserve markdown headers/tables/bullets.
+            # Skip any "thinking" blocks (chain-of-thought, not the answer).
             if isinstance(raw, list):
-                text = " ".join(
+                text = "\n\n".join(
                     b.get("text", "") if isinstance(b, dict) else str(b)
                     for b in raw
-                )
+                    if not (isinstance(b, dict) and b.get("type") == "thinking")
+                ).strip() or str(raw)
             else:
                 text = str(raw)
             logger.info("Gemini responded OK (%d chars)", len(text))
