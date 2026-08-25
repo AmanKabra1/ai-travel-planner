@@ -1043,40 +1043,154 @@ def _build_pdf_bytes(state: dict) -> bytes:
         pdf.set_text_color(30, 41, 59)
         pdf.ln(3)
 
-    def _md_to_fpdf_html(text: str) -> str:
-        """Convert markdown to fpdf2 write_html-compatible HTML."""
-        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    def _split_blocks(text: str) -> list:
+        """Split markdown into alternating ('text', ...) and ('table', ...) blocks."""
+        blocks, current, in_table = [], [], False
+        for line in text.split("\n"):
+            is_tbl = bool(re.match(r"^\s*\|", line.rstrip()))
+            if is_tbl != in_table:
+                if current:
+                    blocks.append(("table" if in_table else "text", "\n".join(current)))
+                current, in_table = [], is_tbl
+            current.append(line)
+        if current:
+            blocks.append(("table" if in_table else "text", "\n".join(current)))
+        return blocks
+
+    def _parse_md_table(text: str):
+        """Return (headers, rows) from a markdown table string."""
+        headers, rows = [], []
+        for line in text.strip().split("\n"):
+            s = line.strip()
+            if not s.startswith("|"):
+                continue
+            if re.match(r"^\|[-:\s|]+\|$", s):
+                continue   # separator row
+            cells = [c.strip() for c in s.split("|")[1:-1]]
+            if not headers:
+                headers = cells
+            else:
+                rows.append(cells)
+        return headers, rows
+
+    def _render_table(pdf, headers: list, rows: list):
+        """Render a markdown table via fpdf2 table() with proportional column widths."""
+        from fpdf import FontFace
+        try:
+            from fpdf.enums import TableBordersLayout, TableCellFillMode
+        except ImportError:
+            return
+        if not headers:
+            return
+        n = len(headers)
+        # Proportional widths from content length
+        char_w = []
+        for i in range(n):
+            mx = len(_clean(headers[i]))
+            for row in rows:
+                if i < len(row):
+                    mx = max(mx, len(_clean(row[i])))
+            char_w.append(max(mx, 4))
+        total = sum(char_w)
+        col_mm = [max(14, int(eff_w * cw / total)) for cw in char_w]
+        diff = eff_w - sum(col_mm)
+        col_mm[-1] = max(10, col_mm[-1] + diff)
+        if pdf.get_y() + 18 > 272:
+            pdf.add_page()
+        hstyle = FontFace(emphasis="BOLD", color=(255, 255, 255),
+                          fill_color=(15, 23, 42), size_pt=8)
+        try:
+            pdf.set_font("Helvetica", "", 8)
+            with pdf.table(
+                col_widths=tuple(col_mm),
+                first_row_as_headings=True,
+                headings_style=hstyle,
+                line_height=5,
+                borders_layout=TableBordersLayout.ALL,
+                cell_fill_mode=TableCellFillMode.ROWS,
+                cell_fill_color=(241, 245, 249),
+            ) as tbl:
+                hr = tbl.row()
+                for h in headers:
+                    hr.cell(_clean(h)[:100])
+                for row_data in rows:
+                    dr = tbl.row()
+                    for i in range(n):
+                        dr.cell(_clean(row_data[i]) if i < len(row_data) else "")
+            pdf.ln(2)
+        except Exception:
+            # Cell-based fallback
+            pdf.set_fill_color(15, 23, 42)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.set_text_color(255, 255, 255)
+            pdf.set_x(pdf.l_margin)
+            for i, h in enumerate(headers):
+                mx_c = max(1, int(col_mm[i] / 2.1))
+                pdf.cell(col_mm[i], 6, _clean(h)[:mx_c], border=1, fill=True,
+                         new_x=XPos.RIGHT, new_y=YPos.TOP)
+            pdf.ln(6)
+            for ridx, row_data in enumerate(rows):
+                if ridx % 2 == 0:
+                    pdf.set_fill_color(241, 245, 249)
+                else:
+                    pdf.set_fill_color(255, 255, 255)
+                pdf.set_font("Helvetica", "", 8)
+                pdf.set_text_color(30, 41, 59)
+                pdf.set_x(pdf.l_margin)
+                for i in range(n):
+                    txt = _clean(row_data[i]) if i < len(row_data) else ""
+                    mx_c = max(1, int(col_mm[i] / 2.1))
+                    pdf.cell(col_mm[i], 5.5, txt[:mx_c], border=1, fill=True,
+                             new_x=XPos.RIGHT, new_y=YPos.TOP)
+                pdf.ln(5.5)
+            pdf.ln(2)
+
+    def _render_section(pdf, content: str):
+        """Render section content: tables via table(), non-table text via write_html."""
+        text = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
         text = re.sub(r"\[([^\]]+)\]\(https?://[^\)]+\)", r"\1", text)
         text = re.sub(r"<https?://[^>]+>", "", text)
         text = text.strip()
         if not text:
-            return ""
-        if _has_md:
-            html = _md_lib.markdown(text, extensions=["tables", "sane_lists"])
-        else:
-            html = "<p>" + re.sub(r"\n\n+", "</p><p>", text) + "</p>"
-        # fpdf2 doesn't support thead/tbody
-        html = re.sub(r"</?thead>", "", html)
-        html = re.sub(r"</?tbody>", "", html)
-        # Style tables with border
-        html = re.sub(r"<table>", '<table border="1" width="178" bgcolor="#f8fafc">', html)
-        # Header cells: dark navy bg + white bold text
-        html = re.sub(
-            r"<th>(.*?)</th>",
-            r'<th bgcolor="#0f172a"><font color="white" size="8"><b>\1</b></font></th>',
-            html, flags=re.DOTALL)
-        # Data cells: small font
-        html = re.sub(
-            r"<td>(.*?)</td>",
-            r'<td><font size="8">\1</font></td>',
-            html, flags=re.DOTALL)
-        # Strip hyperlinks (keep text)
-        html = re.sub(r'<a\s[^>]*>(.*?)</a>', r'\1', html, flags=re.DOTALL)
-        # Unicode → Latin-1
-        html = html.translate(_LATIN1)
-        html = re.sub(r"[^\x00-\xFF]", " ", html)
-        return html
+            return
+        for block_type, block_text in _split_blocks(text):
+            if not block_text.strip():
+                continue
+            if block_type == "table":
+                headers, rows = _parse_md_table(block_text)
+                if headers:
+                    _render_table(pdf, headers, rows)
+            else:
+                # Non-table text: headings, paragraphs, lists
+                if _has_md:
+                    html = _md_lib.markdown(block_text, extensions=["sane_lists"])
+                else:
+                    html = "<p>" + re.sub(r"\n\n+", "</p><p>", block_text.strip()) + "</p>"
+                html = re.sub(r'<a\s[^>]*>(.*?)</a>', r'\1', html, flags=re.DOTALL)
+                html = html.translate(_LATIN1)
+                html = re.sub(r"[^\x00-\xFF]", " ", html)
+                if html.strip():
+                    try:
+                        pdf.set_font("Helvetica", "", 9)
+                        pdf.set_text_color(30, 41, 59)
+                        pdf.set_x(pdf.l_margin)
+                        pdf.write_html(html)
+                        pdf.ln(2)
+                    except Exception:
+                        cleaned = _clean(block_text)
+                        pdf.set_font("Helvetica", "", 9.5)
+                        pdf.set_text_color(30, 41, 59)
+                        for _p in cleaned.split("\n"):
+                            _s = _p.strip()
+                            if _s:
+                                try:
+                                    pdf.set_x(pdf.l_margin)
+                                    pdf.multi_cell(eff_w, 5, _s)
+                                except Exception:
+                                    pdf.ln(2)
+                            else:
+                                pdf.ln(1.5)
 
     # ── Day-table renderer from itinerary_json ────────────────────────────────
     def _draw_day_table(pdf, day_data: dict, color):
@@ -1265,34 +1379,8 @@ def _build_pdf_bytes(state: dict) -> bytes:
             # Skip prose rendering for itinerary section when we have JSON
             continue
 
-        # ── Convert markdown → HTML, render with write_html ──────────────────
-        sec_html = _md_to_fpdf_html(content)
-        if not sec_html.strip():
-            continue
-
-        try:
-            pdf.set_font("Helvetica", "", 9)
-            pdf.set_text_color(30, 41, 59)
-            pdf.set_x(pdf.l_margin)
-            pdf.write_html(sec_html)
-            pdf.ln(3)
-        except Exception:
-            # Fallback: strip markdown to plain text
-            cleaned = _clean(content)
-            if not cleaned.strip():
-                continue
-            pdf.set_font("Helvetica", "", 9.5)
-            pdf.set_text_color(30, 41, 59)
-            for _p in cleaned.split("\n"):
-                _s = _p.strip()
-                if not _s:
-                    pdf.ln(1.5)
-                    continue
-                try:
-                    pdf.set_x(pdf.l_margin)
-                    pdf.multi_cell(eff_w, 5, _s)
-                except Exception:
-                    pdf.ln(2)
+        # ── Render section: tables via table(), text via write_html ─────────
+        _render_section(pdf, content)
 
     return bytes(pdf.output())
 
