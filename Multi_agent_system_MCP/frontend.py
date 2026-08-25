@@ -472,6 +472,24 @@ button[kind="header"]               { display: none !important; }
         });
     }).observe(document.body, { childList: true, subtree: true });
 })();
+
+(function localTimestamps() {
+    function convertAll() {
+        document.querySelectorAll('[data-utcts]').forEach(function(el) {
+            if (el.dataset.converted) return;
+            try {
+                var d = new Date(el.dataset.utcts);
+                if (isNaN(d.getTime())) return;
+                el.textContent = d.toLocaleDateString(undefined, {year:'numeric', month:'short', day:'numeric'})
+                    + ' ' + d.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit'});
+                el.dataset.converted = '1';
+            } catch(e) {}
+        });
+    }
+    convertAll();
+    new MutationObserver(function() { convertAll(); })
+        .observe(document.body, { childList: true, subtree: true });
+})();
 </script>
 """, unsafe_allow_html=True)
 
@@ -1277,13 +1295,20 @@ with st.sidebar:
             active = tid == st.session_state["thread_id"]
             title  = (t["query"] or tid)
             title  = title[:32] + "…" if len(title) > 32 else title
-            ts     = t["ts"][:16].replace("T", " ") if t["ts"] else "—"
+            ts_iso = t["ts"] if t["ts"] else ""
             dot    = "🟢 " if active else ""
+
+            if ts_iso:
+                ts_html = (
+                    f'<span data-utcts="{ts_iso}" style="color:#334155;font-size:0.72rem">…</span>'
+                )
+            else:
+                ts_html = '<span style="color:#334155;font-size:0.72rem">—</span>'
 
             st.markdown(
                 f'<div class="thread-item">'
                 f'<span style="color:#bfdbfe;font-size:0.82rem">{dot}<b>{title}</b></span><br>'
-                f'<span style="color:#334155;font-size:0.72rem">{ts}</span>'
+                f'{ts_html}'
                 f'</div>',
                 unsafe_allow_html=True,
             )
