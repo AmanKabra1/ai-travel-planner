@@ -470,8 +470,7 @@ summary:hover { color: #94a3b8 !important; }
 # ── Constants ─────────────────────────────────────────────────────────────────
 _PIPELINE = [
     ("🗺️", "Planning",   "supervisor_reasoning"),
-    ("✈️", "Flights",    "flight_results"),
-    ("🚂", "Transport",   "transport_results"),
+    ("🚀", "Transport",   "transport_results"),
     ("🏨", "Hotels",     "hotel_results"),
     ("🌤️", "Weather",   "weather_results"),
     ("📍", "Nearby",     "nearby_results"),
@@ -483,8 +482,7 @@ _PIPELINE = [
 
 _NODE_LABELS = {
     "supervisor":       "🗺️  Planning your trip…",
-    "flight_agent":     "✈️  Searching flights & routes…",
-    "transport_agent":  "🚂  Finding trains & buses…",
+    "transport_agent":  "🚀  Searching flights, trains & buses…",
     "hotel_agent":      "🏨  Finding the best accommodation…",
     "weather_agent":    "🌤️  Checking destination weather…",
     "nearby_agent":     "📍  Discovering nearby attractions…",
@@ -551,8 +549,7 @@ def _build_markdown_export(state: dict) -> str:
         f"## Your Request\n{query}\n",
     ]
     for section, key in [
-        ("Flights",              "flight_results"),
-        ("Trains & Buses",       "transport_results"),
+        ("Transport (Flights, Trains & Buses)", "transport_results"),
         ("Accommodation",        "hotel_results"),
         ("Weather & Climate",    "weather_results"),
         ("Nearby Attractions",   "nearby_results"),
@@ -684,7 +681,6 @@ def _build_print_html(state: dict) -> str:
     members     = (state.get("trip_constraints") or {}).get("members", "")
     query       = state.get("user_query", "")
     final       = state.get("final_response", "") or state.get("itinerary", "")
-    flights     = state.get("flight_results", "")
     transport   = state.get("transport_results", "")
     hotels      = state.get("hotel_results", "")
     weather     = state.get("weather_results", "")
@@ -725,8 +721,7 @@ def _build_print_html(state: dict) -> str:
 
 {md_section("Your Request", query)}
 {md_section("Complete Itinerary", final)}
-{md_section("Flights", flights)}
-{md_section("Trains &amp; Buses", transport)}
+{md_section("Transport (Flights, Trains &amp; Buses)", transport)}
 {md_section("Hotels", hotels)}
 {md_section("Weather", weather)}
 {md_section("Nearby Attractions", nearby)}
@@ -750,13 +745,12 @@ def _build_pdf_bytes(state: dict) -> bytes:
     now       = datetime.now().strftime("%d %b %Y")
 
     sections = [
-        ("Complete Itinerary",    state.get("final_response") or state.get("itinerary", "")),
-        ("Flights",               state.get("flight_results", "")),
-        ("Trains & Buses",        state.get("transport_results", "")),
-        ("Hotels",                state.get("hotel_results", "")),
-        ("Weather",               state.get("weather_results", "")),
-        ("Nearby Attractions",    state.get("nearby_results", "")),
-        ("Budget Breakdown",      state.get("budget_results", "")),
+        ("Complete Itinerary",            state.get("final_response") or state.get("itinerary", "")),
+        ("Transport (Flights & Trains & Buses)", state.get("transport_results", "")),
+        ("Hotels",                        state.get("hotel_results", "")),
+        ("Weather",                       state.get("weather_results", "")),
+        ("Nearby Attractions",            state.get("nearby_results", "")),
+        ("Budget Breakdown",              state.get("budget_results", "")),
     ]
 
     _LATIN1 = str.maketrans({
@@ -1187,7 +1181,7 @@ if _is_running:
       ✈️ &nbsp;Building Your Travel Plan…
   </div>
   <div style="color:#475569; font-size:0.83rem; line-height:1.6;">
-      Searching flights &nbsp;·&nbsp; Hotels &nbsp;·&nbsp; Weather &nbsp;·&nbsp;
+      Flights &amp; Trains &amp; Buses &nbsp;·&nbsp; Hotels &nbsp;·&nbsp; Weather &nbsp;·&nbsp;
       Nearby attractions &nbsp;·&nbsp; Budget &nbsp;·&nbsp; Itinerary<br>
       <span style="color:#334155; font-size:0.78rem;">
           All inputs are locked. This usually takes 30–60 seconds.
@@ -1455,7 +1449,7 @@ result = st.session_state.get("latest_result")
 # show a friendly message instead of a blank page.
 if result is not None and not any(
     result.get(k) for k in (
-        "supervisor_reasoning", "flight_results", "hotel_results",
+        "supervisor_reasoning", "hotel_results",
         "transport_results", "itinerary", "final_response",
     )
 ):
@@ -1465,13 +1459,13 @@ if result is not None and not any(
         icon=None,
     )
 
-if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_results", "hotel_results", "transport_results", "itinerary", "final_response")):
+if result and any(result.get(k) for k in ("supervisor_reasoning", "hotel_results", "transport_results", "itinerary", "final_response")):
     st.divider()
 
     _render_pipeline(result)
 
     searches_done = sum(
-        1 for k in ("flight_results", "transport_results", "hotel_results", "weather_results", "nearby_results", "budget_results")
+        1 for k in ("transport_results", "hotel_results", "weather_results", "nearby_results", "budget_results")
         if result.get(k)
     )
     pending       = st.session_state.get("waiting_for_approval")
@@ -1486,25 +1480,16 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_result
     m3.metric("Duration",      duration)
     m4.metric("Status",        status_label)
 
-    tab_fl, tab_tr, tab_ht, tab_wx, tab_nb, tab_bud, tab_itin = st.tabs(
-        ["✈️  Flights", "🚂  Transport", "🏨  Hotels", "🌤️  Weather", "📍  Nearby", "💰  Budget", "📋  Itinerary"]
+    tab_tr, tab_ht, tab_wx, tab_nb, tab_bud, tab_itin = st.tabs(
+        ["🚀  Transport", "🏨  Hotels", "🌤️  Weather", "📍  Nearby", "💰  Budget", "📋  Itinerary"]
     )
-    with tab_fl:
-        content = result.get("flight_results")
-        if content:
-            st.markdown(content)
-        else:
-            st.markdown(
-                '<div class="tip-card"><div class="tip-card-text">Flight information was not requested for this plan. Try adding specific travel dates and a departure city.</div></div>',
-                unsafe_allow_html=True,
-            )
     with tab_tr:
         content = result.get("transport_results")
         if content:
             st.markdown(content)
         else:
             st.markdown(
-                '<div class="tip-card"><div class="tip-card-text">Transport options (trains, buses, self-drive) will appear here. Make sure you entered a departure city in the "From" field.</div></div>',
+                '<div class="tip-card"><div class="tip-card-text">Transport options — flights, trains, buses, and self-drive — will appear here. Make sure you entered a departure city in the "From" field.</div></div>',
                 unsafe_allow_html=True,
             )
     with tab_ht:
@@ -1579,33 +1564,65 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_result
 # ── Human Approval panel — Review results & choose preferences ────────────────
 if st.session_state.get("waiting_for_approval"):
     st.divider()
+    _res = st.session_state.get("latest_result", {}) or {}
+
     st.markdown(
         '<div class="approval-box">'
-        '<div class="approval-title">Almost there! Choose your preferences</div>'
+        '<div class="approval-title">✅ Research complete — choose your preferences</div>'
         '<div class="approval-sub">'
-        'We have researched flights, hotels, weather &amp; nearby attractions. '
-        'Review the tabs above, then tell us your choices — we will build your '
-        'personalised itinerary and PDF right away.'
+        'We found transport options, hotels, weather &amp; nearby attractions. '
+        'Review the tabs above, make your selections below, and we will craft your personalised itinerary.'
         '</div>'
         '</div>',
         unsafe_allow_html=True,
     )
 
+    # ── Context snippets from agent results ──────────────────────────────────
+    _tr = _res.get("transport_results", "") or ""
+    _ht = _res.get("hotel_results", "") or ""
+
+    # Detect which transport modes were actually found
+    def _transport_modes_found(text: str) -> list[str]:
+        t = text.lower()
+        modes = []
+        if any(k in t for k in ["flight", "airline", "airways", "airfare", "airport"]):
+            modes.append("Flight")
+        if any(k in t for k in ["train", "railway", "irctc", " express", "rajdhani", "shatabdi"]):
+            modes.append("Train")
+        if any(k in t for k in ["bus", "redbus", "abhibus", "volvo"]):
+            modes.append("Bus")
+        if any(k in t for k in ["drive", "highway", "km", " cab", "ola", "uber"]):
+            modes.append("Self-drive / Car rental")
+        modes.append("No preference")
+        return modes if len(modes) > 1 else ["Flight", "Train", "Bus", "Self-drive / Car rental", "No preference"]
+
+    _transport_options = _transport_modes_found(_tr)
+
+    if _tr:
+        with st.expander("🚀 View transport options found (flights, trains, buses)", expanded=False):
+            st.markdown(_tr[:3000] + ("…" if len(_tr) > 3000 else ""))
+
+    if _ht:
+        with st.expander("🏨 View hotel options found", expanded=False):
+            st.markdown(_ht[:2500] + ("…" if len(_ht) > 2500 else ""))
+
+    # ── Choice inputs ──────────────────────────────────────────────────────
     c1, c2 = st.columns(2)
     with c1:
         ch_transport = st.radio(
-            "✈️  How do you want to travel to the destination?",
-            ["Flight", "Train", "Bus", "Self-drive / Car rental", "No preference"],
+            f"🚀  Which transport mode suits you? ({len(_transport_options)-1} found)",
+            _transport_options,
             horizontal=False,
         )
         ch_food = st.radio(
             "🍽️  Dietary preference?",
-            ["Vegetarian", "Non-vegetarian", "No preference"],
+            ["Vegetarian 🌿", "Non-vegetarian", "No preference"],
             horizontal=False,
+            help="Selecting Vegetarian will filter hotels and restaurants to veg-friendly options only.",
         )
     with c2:
         ch_hotel = st.radio(
-            "🏨  Hotel budget?",
+            "🏨  Hotel budget tier?",
             ["Budget  (< Rs.2,000/night)", "Mid-range  (Rs.2,000–5,000)", "Premium  (Rs.5,000+)"],
             horizontal=False,
         )
@@ -1617,10 +1634,18 @@ if st.session_state.get("waiting_for_approval"):
 
     ch_special = st.text_input(
         "💬  Any special requests? (optional)",
-        placeholder="E.g. wheelchair access, avoid stairs, halal food, honeymoon couple…",
+        placeholder="E.g. wheelchair access, avoid stairs, halal food, honeymoon couple, anniversary trip…",
     )
 
     if st.button("🗺️  Generate My Personalised Itinerary", type="primary", use_container_width=True):
+        # Store choices in session so we can show them in the final view
+        st.session_state["user_choices_display"] = {
+            "transport": ch_transport,
+            "hotel":     ch_hotel,
+            "food":      ch_food,
+            "style":     ch_style,
+            "special":   ch_special,
+        }
         with st.spinner("✨  Crafting your personalised day-by-day plan…"):
             final = app.invoke(
                 Command(resume={
@@ -1650,6 +1675,34 @@ if final and final.get("final_response"):
         f'</div>',
         unsafe_allow_html=True,
     )
+
+    # ── Non-editable choices summary ─────────────────────────────────────────
+    _choices = (
+        final.get("user_choices")
+        or st.session_state.get("user_choices_display")
+        or {}
+    )
+    if _choices:
+        _pill_items = [
+            ("🚀 Transport", _choices.get("transport") or _choices.get("transport", "")),
+            ("🏨 Hotel",     _choices.get("hotel", "")),
+            ("🍽️ Food",     _choices.get("food", "")),
+            ("🗺️ Style",    _choices.get("style", "")),
+        ]
+        _pills_html = "".join(
+            f'<span class="pref-pill"><b>{lbl}:</b> {val}</span>'
+            for lbl, val in _pill_items if val
+        )
+        _special = _choices.get("special_requests") or _choices.get("special", "")
+        if _special:
+            _pills_html += f'<span class="pref-pill"><b>📝 Special:</b> {_special}</span>'
+        st.markdown(
+            f'<div class="prefs-panel" style="margin-top:0;margin-bottom:1rem;padding:1rem 1.4rem">'
+            f'<div class="prefs-panel-title" style="font-size:0.85rem;margin-bottom:0.5rem">Your confirmed preferences</div>'
+            f'<div class="prefs-choices">{_pills_html}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
     st.markdown(final["final_response"])
 

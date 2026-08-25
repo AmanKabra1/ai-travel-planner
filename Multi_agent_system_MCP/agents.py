@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.types import interrupt
 
 from config import GROQ_FALLBACKS, get_llm, get_retry_models
-from mcp_client import current_weather, forecast, list_airlines, list_airports, tavily_search
+from mcp_client import current_weather, forecast, tavily_search
 from nearby_api import (
     bucket_pois,
     format_pois_text,
@@ -175,8 +175,7 @@ User request:
 Decide which specialist agents are needed for the user request.
 
 Available agents:
-- flight_agent    : flights, airports, airlines, routes, airfare
-- transport_agent : trains, buses, ground transport, overland routes between cities
+- transport_agent : flights, trains, buses, airlines, airports, airfare, ground transport, overland routes between cities
 - hotel_agent     : hotels, accommodation, neighbourhood guides
 - weather_agent   : weather, climate, seasonal advice, packing
 - nearby_agent    : nearby attractions, temples, parks, local food, points of interest
@@ -187,7 +186,7 @@ IMPORTANT: If the request mentions both an origin city AND a destination city, A
 
 Return ONLY JSON:
 {{
-  "selected_agents": ["flight_agent", "transport_agent", "hotel_agent", "weather_agent", "nearby_agent", "budget_agent", "itinerary_agent"],
+  "selected_agents": ["transport_agent", "hotel_agent", "weather_agent", "nearby_agent", "budget_agent", "itinerary_agent"],
   "trip_constraints": {{
     "destination": "",
     "origin": "",
@@ -208,7 +207,7 @@ User request:
     except (ValueError, json.JSONDecodeError) as exc:
         logger.warning("Routing JSON parse failed: %s. Defaulting all agents.", exc)
         parsed = {
-            "selected_agents":  ["flight_agent", "transport_agent", "hotel_agent",
+            "selected_agents":  ["transport_agent", "hotel_agent",
                                   "weather_agent", "nearby_agent", "budget_agent",
                                   "itinerary_agent"],
             "trip_constraints": {},
@@ -228,11 +227,11 @@ User request:
 
     # Force transport_agent when both origin and destination are given
     selected = parsed.get("selected_agents", [])
+    # Remove flight_agent if LLM returned it (it's now part of transport_agent)
+    selected = [a for a in selected if a != "flight_agent"]
     if merged_constraints.get("origin") and merged_constraints.get("destination"):
         if "transport_agent" not in selected:
-            # Insert after flight_agent (or at position 1)
-            idx = selected.index("flight_agent") + 1 if "flight_agent" in selected else 1
-            selected.insert(idx, "transport_agent")
+            selected.insert(0, "transport_agent")
 
     return {
         "selected_agents":      selected,
@@ -240,67 +239,6 @@ User request:
         "supervisor_reasoning": parsed.get("reasoning", ""),
         "messages":             [AIMessage(content="Supervisor created the agent plan.")],
         "llm_calls":            state.get("llm_calls", 0) + 1,
-    }
-
-
-# ── Flight agent ──────────────────────────────────────────────────────────────
-
-def flight_agent(state: TravelState):
-    query       = state["user_query"]
-    constraints = state.get("trip_constraints", {})
-    destination = constraints.get("destination", "")
-    logger.info("Flight agent — destination: %s", destination)
-
-    try:
-        airports = asyncio.run(list_airports(destination, limit=10))
-        airlines = asyncio.run(list_airlines("", limit=10))
-        airport_text = _extract_text(airports)[:3000]
-        airline_text = _extract_text(airlines)[:3000]
-    except Exception as exc:
-        logger.warning("Flight MCP call failed: %s", exc)
-        airport_text = airline_text = "Live data unavailable."
-
-    result = _llm_text(
-        "You are a FLIGHTS-ONLY specialist. "
-        "Output ONLY flight information — airports, airlines, fares, booking links. "
-        "Do NOT write a travel itinerary. Do NOT mention hotels, food, or sightseeing. "
-        "If no direct flight exists for the route, say so clearly and show the best 1-stop option.",
-        f"""Provide flight options for this route ONLY.
-
-Route: {constraints.get('origin', '?')} → {constraints.get('destination', '?')}
-Dates: {constraints.get('start_date', '?')} to {constraints.get('end_date', '?')}
-Travellers: {constraints.get('members', 2)}
-
-Airport data:
-{airport_text[:2000]}
-
-Airline data:
-{airline_text[:2000]}
-
-Return ONLY this markdown structure — nothing else:
-
-## ✈️ Flights: {constraints.get('origin', '?')} → {constraints.get('destination', '?')}
-
-### Direct Flights
-(List any direct flights, or write "No direct flights on this route.")
-
-### 1-Stop / Connecting Options
-- Via [Hub City]: Airline, approx. fare Rs./$ X, total ~X hrs
-- [Book](https://www.google.com/flights?q=flights+from+{constraints.get('origin','')!r}+to+{constraints.get('destination','')!r})
-
-### Nearest Airports
-- Origin: [Airport name, IATA code, X km from city centre]
-- Destination: [Airport name, IATA code, X km from city centre]
-
-### Tips
-- Best time to book, baggage allowance, budget vs full-service comparison (2 bullet points max)
-""",
-    )
-
-    return {
-        "flight_results": result,
-        "messages":       [AIMessage(content="Flight agent completed.")],
-        "llm_calls":      state.get("llm_calls", 0) + 1,
     }
 
 
@@ -354,8 +292,9 @@ def transport_agent(state: TravelState):
 
     route_str = f"{origin} to {destination}" if origin else destination
 
-    # ── All 4 transport searches run in parallel threads ──────────────────────
-    train_direct, train_via, bus_search, general = _parallel_tavily(
+    # ── 5 parallel searches: flights + trains (direct + via) + buses + general ──
+    flights_search, train_direct, train_via, bus_search, general = _parallel_tavily(
+        f"flight {route_str} 2026 airline airfare cheap air tickets booking IndiGo SpiceJet AirAsia",
         f"train {route_str} 2026 direct schedule timing fare IRCTC booking",
         f"how to reach {destination} from {origin} by train 2026 via connecting junction route change",
         f"bus {route_str} 2026 Redbus Abhibus schedule timing booking fare",
@@ -363,11 +302,14 @@ def transport_agent(state: TravelState):
     )
 
     result = _llm_text(
-        "You are a ground transport specialist. You always show real schedules, fares, and booking links.",
-        f"""Provide a comprehensive transport guide for this route.
+        "You are a comprehensive transport specialist covering flights, trains, buses, and road travel. Always show real schedules, fares, and booking links.",
+        f"""Provide a comprehensive transport guide for this route covering ALL modes of transport.
 
 User request: {state['user_query']}
 Route: {route_str}
+
+Flight search results:
+{flights_search}
 
 Direct train search results:
 {train_direct}
@@ -382,6 +324,13 @@ General transport search:
 {general}
 
 Return a clean markdown guide with these sections:
+
+## ✈️ Flights
+### Direct Flights
+List any direct flights found: airline, fare range, duration, [Book on Google Flights](https://www.google.com/flights)
+### Connecting Flights (if no direct)
+- Via [Hub]: Airline, approx. fare Rs./$ X, total ~X hrs
+If no flight data available, write: "No flight data found — check Google Flights or MakeMyTrip."
 
 ## 🚂 Trains
 ### Direct Trains
@@ -655,11 +604,8 @@ Trip details:
 Live 2026 price data for {destination}:
 {price_data}
 
-Flight info (use fares from here):
-{state.get('flight_results', 'N/A')[:800]}
-
-Transport info (use fares from here):
-{state.get('transport_results', 'N/A')[:800]}
+Transport info — flights, trains, buses (use fares from here):
+{state.get('transport_results', 'N/A')[:1200]}
 
 Hotel info (use prices from here):
 {state.get('hotel_results', 'N/A')[:800]}
@@ -729,12 +675,24 @@ Do NOT invent hotel names, prices, or transport fares that were not in the
 provided data. Clearly mark any gap as "approx. — verify before booking."
 
 ═══════════════════════════════
+FOOD PREFERENCE RULES
+═══════════════════════════════
+If the user chose VEGETARIAN food preference:
+- Hotels: only recommend hotels with an in-house vegetarian restaurant OR with a
+  confirmed pure-veg restaurant within 200m. Mark each hotel "🌿 Veg-friendly".
+- Meals: every breakfast/lunch/dinner suggestion must be vegetarian dishes and
+  vegetarian-friendly restaurants ONLY — no meat, fish, or eggs.
+- In the "What to Say" section, include specific phrases for requesting veg meals.
+
+═══════════════════════════════
 WHAT TO PRODUCE
 ═══════════════════════════════
 A) HOTELS — use data from the pre-fetched hotel results. List:
    budget pick, best-value pick, premium pick with price/night & booking link.
+   If VEGETARIAN: mark each hotel with 🌿 Veg-friendly or ❌ Limited veg options.
 
 B) LOCAL FOOD — top 5–8 must-try local dishes/street food with where to find them.
+   If VEGETARIAN: only vegetarian dishes and pure-veg eateries.
 
 C) LOCAL MARKETS — 2–3 popular markets/bazaars, known for, best time to visit.
 
@@ -742,7 +700,47 @@ D) NEARBY ATTRACTIONS (within ~100 km of destination) — temples, waterfalls,
    historic sites, parks, viewpoints. For each: name, distance, entry fee,
    ideal visit duration, best time.
 
-E) TRANSPORT — use data from pre-fetched flight/train/bus results.
+E) TRANSPORT — use data from pre-fetched transport results (includes flights, trains, buses).
+
+F) WHAT TO SAY & DO — Practical Conversation Guide (ALWAYS INCLUDE, very valuable):
+   Add "## 💬 What to Say & Do" section with these subsections:
+
+   ### 🏨 At Your Hotel
+   - Check-in phrase: "Do you have my reservation under [Name]? Can I see the room first?"
+   - Room requests: "Can I have a quieter room / higher floor / non-smoking?"
+   - Dietary: if VEGETARIAN — "I am vegetarian. Do you serve vegetarian meals? Is there a pure-veg restaurant nearby?"
+   - Checkout: "What time is checkout? Can I get a 1-hour late checkout?"
+   - Negotiate: "We are staying for X nights. Can you offer a small discount?"
+
+   ### 🚂 At the Train Station
+   - Finding platform: "Which platform is [Train Name / Number]?" (Hindi: "Platform kaunsa hai [Train]?")
+   - Delay check: "Is the train on time?" (Hindi: "Gaadi time par aayegi?")
+   - Berth: Show TTE (Ticket Examiner) your booking confirmation for berth assignment.
+   - Porter: "How much to Platform X?" (Hindi: "[Amount] mein Platform [X] chaloge?")
+   - Pantry car: "Is there a pantry car on this train?" (Hindi: "Pantry car hai is gaadi mein?")
+
+   ### 🚌 At the Bus Stand
+   - Finding bus: "Which bus goes to [Destination]?" (Hindi: "[Destination] ki bus kaunsi hai?")
+   - Seat: "Is this seat taken?" (Hindi: "Kya yeh seat khaali hai?")
+   - Conductor: Show ticket; ask "Which stop is [landmark]?" (Hindi: "[landmark] kaun sa stop hai?")
+   - Luggage: Usually stored under the bus — ask driver before boarding.
+
+   ### 🛒 At Local Markets (Bargaining Guide)
+   - Always start at 50–60% of the quoted price for souvenirs and non-fixed-price items.
+   - "What is your best price?" (Hindi: "Sab se kam mein kya doge?")
+   - "Too expensive. Can you lower it?" (Hindi: "Bahut mehanga hai. Thoda kam karo.")
+   - "I'll take two if you lower the price." — bundle deals work well.
+   - Walking away often gets a better offer — turn back after 3–4 steps.
+
+   ### 🚕 Getting Around Locally
+   - Always agree on fare BEFORE boarding auto/cab: "Meter se chaloge?" (By meter?)
+   - For prepaid Ola/Uber: show the driver the app map to avoid route disputes.
+   - If overcharged: note the vehicle number and complain to local tourist police.
+
+   ### 🆘 Emergency Numbers (for this destination — adapt to actual destination)
+   - Police: 100 (India) | Tourist Helpline: 1800-11-1363
+   - Medical: 108 (Ambulance, India)
+   - Note: "I need help. Please call the police." (Hindi: "Mujhe madad chahiye. Police ko bulao.")
 
 ═══════════════════════════════
 ITINERARY RULES
@@ -808,21 +806,20 @@ Trip details:
 - End date: {constraints.get('end_date', 'Not specified')}
 - Travellers: {constraints.get('members', 2)}
 - Budget: {constraints.get('budget', 'Not specified')}
-- Transport preference (USER CHOSE): {uc_transport}
-- Hotel tier (USER CHOSE): {uc_hotel}
-- Food preference (USER CHOSE): {uc_food}
-- Travel style (USER CHOSE): {uc_style}
-- Special requests: {uc_special if uc_special else 'None'}
 - Interests: {constraints.get('interests', [])}
 
 User's full request:
 {state['user_query']}
 
-═══ PRE-FETCHED FLIGHTS DATA ═══
-{state.get('flight_results', 'Not fetched.')}
+USER CHOICES (apply strictly):
+- Transport chosen: {uc_transport}
+- Hotel tier chosen: {uc_hotel}
+- Food preference: {uc_food} {"→ VEGETARIAN MODE: recommend ONLY veg-friendly hotels and pure-veg dishes" if "Vegetarian" in uc_food else ""}
+- Travel style: {uc_style}
+- Special requests: {uc_special if uc_special else "None"}
 
-Flight info:
-{state.get('flight_results', '')}
+═══ PRE-FETCHED TRANSPORT DATA (flights, trains, buses) ═══
+{state.get('transport_results', 'Not fetched.')}
 
 ═══ PRE-FETCHED HOTELS DATA (with booking links) ═══
 {state.get('hotel_results', 'Not fetched.')}
@@ -884,7 +881,6 @@ def human_approval_agent(state: TravelState):
 
     choices = interrupt({
         "type":              "user_choices",
-        "flight_results":    state.get("flight_results", ""),
         "transport_results": state.get("transport_results", ""),
         "hotel_results":     state.get("hotel_results", ""),
         "budget_results":    state.get("budget_results", ""),
@@ -905,16 +901,28 @@ def final_response_agent(state: TravelState):
     approved = state.get("approved", True)
     logger.info("Final agent — approved=%s", approved)
 
+    user_choices = state.get("user_choices") or {}
+    choices_summary = (
+        f"Transport: {user_choices.get('transport','—')} | "
+        f"Hotel: {user_choices.get('hotel','—')} | "
+        f"Food: {user_choices.get('food','—')} | "
+        f"Style: {user_choices.get('style','—')}"
+    )
+
     if approved:
         prompt = f"""The user approved the draft itinerary.
 
+USER'S CONFIRMED PREFERENCES: {choices_summary}
+Special requests: {user_choices.get('special_requests', 'None')}
+
 Produce the final, polished travel plan. Make it beautiful and practical.
-Include hotel booking links and train/bus booking links where available.
+Include hotel booking links and transport booking links where available.
+Ensure the "💬 What to Say & Do" section is present and complete.
 
 Draft itinerary:
 {state.get('itinerary', '')}
 
-Train & bus options (with links):
+Transport options — flights, trains, buses (with links):
 {state.get('transport_results', '')}
 
 Hotel recommendations (with links):
@@ -935,7 +943,7 @@ Draft itinerary:
 User feedback:
 {state.get('human_feedback', '')}
 
-Train & bus options (with links):
+Transport options — flights, trains, buses (with links):
 {state.get('transport_results', '')}
 
 Hotel recommendations (with links):
@@ -946,6 +954,7 @@ Budget notes:
 
 Revise the itinerary to address the user's feedback. Make it final and polished.
 Include clickable links for hotels and transport bookings.
+Ensure the "💬 What to Say & Do" section is present and complete.
 """
 
     result = _llm_text("You produce final, user-ready travel plans.", prompt)
