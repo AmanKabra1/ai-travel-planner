@@ -551,7 +551,11 @@ def _clean_tab(text: str, max_chars: int = 10000) -> str:
     if not text:
         return text
     import re as _re_ct
+    # Strip complete <think>...</think> pairs
     text = _re_ct.sub(r'<think>.*?</think>', '', text, flags=_re_ct.DOTALL | _re_ct.IGNORECASE)
+    # Strip any unclosed <think> tag (LLM truncated mid-think — cut from tag to end)
+    text = _re_ct.sub(r'<think>.*', '', text, flags=_re_ct.DOTALL | _re_ct.IGNORECASE)
+    text = text.strip()
     # Detect repetition: same 120-char window appearing 3+ times → cut before 3rd
     window = 120
     t = text
@@ -2000,8 +2004,7 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "hotel_results
         else:
             st.markdown('<div class="tip-card"><div class="tip-card-text">Weather data will appear here once the destination is confirmed.</div></div>', unsafe_allow_html=True)
     with tab_nb:
-        import re as _re2
-        _c = _re2.sub(r"<think>.*?</think>", "", result.get("nearby_results", ""), flags=_re2.DOTALL | _re2.IGNORECASE).strip()
+        _c = _clean_tab(result.get("nearby_results") or "")
         if _c:
             st.markdown(_clean_tab(_c))
         else:

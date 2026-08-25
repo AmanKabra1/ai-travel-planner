@@ -25,12 +25,15 @@ llm = get_llm()
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 
-_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_THINK_RE  = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_THINK_OPEN = re.compile(r"<think>.*",         re.DOTALL | re.IGNORECASE)
 
 
 def _strip_think(text: str) -> str:
-    """Remove <think>…</think> chain-of-thought blocks from reasoning models."""
-    return _THINK_RE.sub("", text).strip()
+    """Remove <think>…</think> blocks; also removes unclosed <think> to end-of-string."""
+    text = _THINK_RE.sub("", text)
+    text = _THINK_OPEN.sub("", text)
+    return text.strip()
 
 
 def _extract_content(result) -> str:
