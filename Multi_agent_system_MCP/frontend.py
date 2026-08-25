@@ -1655,21 +1655,8 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "hotel_results
         _tr = _apr_res.get("transport_results", "") or ""
         _ht = _apr_res.get("hotel_results", "") or ""
 
-        def _transport_modes_found(text: str) -> list[str]:
-            t = text.lower()
-            modes = []
-            if any(k in t for k in ["flight", "airline", "airways", "airfare", "airport"]):
-                modes.append("Flight")
-            if any(k in t for k in ["train", "railway", "irctc", " express", "rajdhani", "shatabdi"]):
-                modes.append("Train")
-            if any(k in t for k in ["bus", "redbus", "abhibus", "volvo"]):
-                modes.append("Bus")
-            if any(k in t for k in ["drive", "highway", " cab", "ola", "uber"]):
-                modes.append("Self-drive / Car rental")
-            modes.append("No preference")
-            return modes if len(modes) > 1 else ["Flight", "Train", "Bus", "Self-drive / Car rental", "No preference"]
-
-        _transport_options = _transport_modes_found(_tr)
+        # Always show all transport modes — agent covers flights, trains, buses & drive
+        _transport_options = ["Flight", "Train", "Bus", "Self-drive / Car rental", "No preference"]
         _ex1, _ex2 = st.columns(2)
         with _ex1:
             if _tr:
@@ -1683,7 +1670,7 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "hotel_results
         _c1, _c2 = st.columns(2)
         with _c1:
             ch_transport = st.radio(
-                f"Which transport mode? ({len(_transport_options)-1} found)",
+                "Which transport mode do you prefer?",
                 _transport_options, horizontal=False,
             )
             ch_food = st.radio(
