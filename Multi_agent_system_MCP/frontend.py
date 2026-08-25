@@ -424,6 +424,25 @@ summary:hover { color: #94a3b8 !important; }
 }
 .section-icon { font-size: 1.2rem; }
 .section-title { font-size: 1.1rem; font-weight: 700; color: #bfdbfe !important; }
+
+/* ── Preferences panel ── */
+.prefs-panel {
+    background: linear-gradient(135deg, #0a1628 0%, #0c1f3a 100%);
+    border: 1px solid #1a3a6b; border-radius: 16px;
+    padding: 2rem 2.2rem; margin-top: 1.5rem;
+}
+.prefs-panel-title { font-size: 1.35rem; font-weight: 700; color: #7dd3fc; margin-bottom: 0.2rem; }
+.prefs-panel-sub { color: #475569; font-size: 0.84rem; margin-bottom: 1.5rem; }
+.prefs-choices { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.5rem; }
+.pref-pill { background: #0f2341; border: 1px solid #1a3a6b; border-radius: 20px;
+    padding: 0.28rem 0.75rem; font-size: 0.78rem; color: #7dd3fc; }
+.confirm-box {
+    background: linear-gradient(135deg, #0c2340, #062040);
+    border: 1px solid #0ea5e9; border-left: 4px solid #0ea5e9;
+    border-radius: 12px; padding: 1.2rem 1.5rem; margin: 1.5rem 0 0.5rem;
+}
+.confirm-box-title { font-size: 1.05rem; font-weight: 700; color: #7dd3fc; margin-bottom: 0.15rem; }
+.confirm-box-sub { color: #64748b; font-size: 0.83rem; }
 </style>
 <script>
 (function disableSpellcheck() {
@@ -1287,65 +1306,154 @@ if st.session_state.get("_append_style"):
     st.session_state.pop("_append_style")
 
 
-# ── Run button ────────────────────────────────────────────────────────────────
+# ── Run button (Step 1 → goes to preferences) ─────────────────────────────────
 col_btn, col_hint = st.columns([2, 5])
 with col_btn:
     run = st.button(
-        "✈️  Create My Travel Plan" if not _is_running else "⏳  Working…",
-        type="primary", use_container_width=True, disabled=_is_running,
+        "Next: Set Preferences →" if not _is_running else "⏳  Working…",
+        type="primary", use_container_width=True,
+        disabled=_is_running or bool(st.session_state.get("show_prefs")),
     )
 with col_hint:
     st.markdown(
         "<div style='padding-top:0.65rem;color:#334155;font-size:0.83rem'>"
-        "Flights · Trains &amp; Buses · Hotels · Weather · Budget · Itinerary"
+        "Step 1 of 2 — enter your trip details, then choose travel preferences"
         "</div>",
         unsafe_allow_html=True,
     )
 
 
-# ── Stage 1: Button clicked → save inputs, set running, rerun ─────────────────
-if run and not _is_running:
+# ── Stage 1: Next clicked → capture form, show preferences panel ──────────────
+if run and not _is_running and not st.session_state.get("show_prefs"):
     _origin    = st.session_state.get("from_input",    "").strip()
     _dest      = st.session_state.get("to_input",      "").strip()
     _s_date    = st.session_state.get("start_date",    date.today())
     _e_date    = st.session_state.get("end_date",      date.today() + timedelta(days=14))
     _members   = int(st.session_state.get("n_members", 2))
-    _tpref     = st.session_state.get("transport_pref","Mixed (Auto)")
     _interests = st.session_state.get("interests",     [])
-    _duration  = (_e_date - _s_date).days
 
     if not _dest and not query.strip():
         st.warning("Please enter a destination (To field) or describe your trip.")
     else:
-        parts = []
-        if _origin and _dest:
-            parts.append(f"Travelling from {_origin} to {_dest}")
-        elif _dest:
-            parts.append(f"Destination: {_dest}")
-        elif _origin:
-            parts.append(f"Departing from {_origin}")
-        parts.append(f"from {_s_date} to {_e_date} ({_duration} days)")
-        parts.append(f"for {_members} traveller{'s' if _members > 1 else ''}")
-        if _tpref != "Mixed (Auto)":
-            parts.append(f"preferring {_tpref} for main travel")
-        if _interests:
-            parts.append(f"interests: {', '.join(_interests)}")
-
-        enriched_query = "; ".join(parts) + ". " + query.strip()
-
-        st.session_state["pending_run"] = {
-            "enriched_query": enriched_query,
-            "origin":         _origin,
-            "dest":           _dest,
-            "start_date":     str(_s_date),
-            "end_date":       str(_e_date),
-            "members":        _members,
-            "transport_mode": _tpref.split()[0].lower(),
-            "interests":      _interests,
-            "budget":         query.strip(),
+        st.session_state["show_prefs"] = True
+        st.session_state["form_data"]  = {
+            "origin":   _origin, "dest":     _dest,
+            "s_date":   str(_s_date), "e_date": str(_e_date),
+            "members":  _members, "interests": _interests,
+            "query":    query.strip(),
         }
-        st.session_state["is_running"] = True
         st.rerun()
+
+
+# ── Stage 1.5: Preferences panel ─────────────────────────────────────────────
+if st.session_state.get("show_prefs") and not _is_running and not _pending_run:
+    fd = st.session_state.get("form_data", {})
+    _dest_disp = fd.get("dest") or fd.get("query", "your destination")
+
+    st.markdown(
+        f'<div class="prefs-panel">'
+        f'<div class="prefs-panel-title">Step 2 — Personalise Your Trip to {_dest_disp}</div>'
+        f'<div class="prefs-panel-sub">Choose your travel preferences below, then confirm to start planning.</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    with st.container():
+        p1, p2 = st.columns(2)
+        with p1:
+            pref_transport = st.radio(
+                "✈️  How do you want to travel?",
+                ["✈️ Flight", "🚂 Train", "🚌 Bus", "🚗 Self-drive / Car rental"],
+                horizontal=False,
+            )
+            pref_food = st.radio(
+                "🍽️  Dietary preference?",
+                ["🥗 Vegetarian", "🍖 Non-vegetarian", "🍽️ No preference"],
+                horizontal=False,
+            )
+        with p2:
+            pref_hotel = st.radio(
+                "🏨  Hotel budget?",
+                ["🏚️ Budget  (< ₹2,000 / night)", "🏨 Mid-range  (₹2,000–5,000 / night)", "🏩 Premium  (₹5,000+ / night)"],
+                horizontal=False,
+            )
+            pref_style = st.radio(
+                "🗺️  Travel style?",
+                ["🗺️ Explorer (lots of sightseeing)", "🧘 Relaxed (slow pace)", "🍽️ Foodie (local cuisine)", "🙏 Cultural / Spiritual"],
+                horizontal=False,
+            )
+
+    # Summary pills
+    _pills_html = (
+        '<div class="confirm-box">'
+        '<div class="confirm-box-title">Your Preferences</div>'
+        '<div class="confirm-box-sub">We will tailor flights, hotels, food & activities to match these.</div>'
+        '<div class="prefs-choices">'
+        f'<span class="pref-pill">{pref_transport}</span>'
+        f'<span class="pref-pill">{pref_hotel}</span>'
+        f'<span class="pref-pill">{pref_food}</span>'
+        f'<span class="pref-pill">{pref_style}</span>'
+        '</div></div>'
+    )
+    st.markdown(_pills_html, unsafe_allow_html=True)
+
+    col_back, col_confirm = st.columns([1, 2])
+    with col_back:
+        if st.button("← Back", use_container_width=True):
+            st.session_state.pop("show_prefs", None)
+            st.session_state.pop("form_data", None)
+            st.rerun()
+    with col_confirm:
+        if st.button("✅  Confirm & Start Planning", type="primary", use_container_width=True):
+            fd = st.session_state["form_data"]
+            _origin   = fd["origin"]
+            _dest     = fd["dest"]
+            _s_date   = fd["s_date"]
+            _e_date   = fd["e_date"]
+            _members  = fd["members"]
+            _interests = fd.get("interests", [])
+            _query    = fd.get("query", "")
+            _duration = (date.fromisoformat(_e_date) - date.fromisoformat(_s_date)).days
+
+            _transport_clean = pref_transport.split()[1] if " " in pref_transport else pref_transport
+            _hotel_clean     = pref_hotel.split("  ")[0].strip().lstrip("🏚️🏨🏩").strip() if "  " in pref_hotel else pref_hotel
+            _food_clean      = pref_food.split(" ", 1)[1] if " " in pref_food else pref_food
+            _style_clean     = pref_style.split("(")[0].strip().split(" ", 1)[1] if " " in pref_style else pref_style
+
+            parts = []
+            if _origin and _dest:
+                parts.append(f"Travelling from {_origin} to {_dest}")
+            elif _dest:
+                parts.append(f"Destination: {_dest}")
+            parts.append(f"from {_s_date} to {_e_date} ({_duration} days)")
+            parts.append(f"for {_members} traveller{'s' if _members > 1 else ''}")
+            parts.append(f"preferred transport: {_transport_clean}")
+            parts.append(f"hotel budget: {_hotel_clean}")
+            parts.append(f"food preference: {_food_clean}")
+            parts.append(f"travel style: {_style_clean}")
+            if _interests:
+                parts.append(f"interests: {', '.join(_interests)}")
+
+            enriched_query = "; ".join(parts) + (". " + _query if _query else "")
+
+            st.session_state["pending_run"] = {
+                "enriched_query": enriched_query,
+                "origin":         _origin,
+                "dest":           _dest,
+                "start_date":     _s_date,
+                "end_date":       _e_date,
+                "members":        _members,
+                "transport_mode": _transport_clean.lower(),
+                "interests":      _interests,
+                "budget":         _query,
+                "hotel_budget":   _hotel_clean,
+                "food_pref":      _food_clean,
+                "travel_style":   _style_clean,
+            }
+            st.session_state["is_running"] = True
+            st.session_state.pop("show_prefs", None)
+            st.session_state.pop("form_data", None)
+            st.rerun()
 
 
 # ── Stage 2: Pending run exists → execute agents ──────────────────────────────
@@ -1594,16 +1702,7 @@ if final and final.get("final_response"):
 
     st.markdown(final["final_response"])
 
-    col_dl, col_pdf, col_share = st.columns([2, 2, 2])
-
-    with col_dl:
-        st.download_button(
-            label="📥  Download (.md)",
-            data=_build_markdown_export(final).encode("utf-8"),
-            file_name=f"travel_plan_{dest_label.replace(' ', '_').lower()}_{st.session_state['thread_id'][-6:]}.md",
-            mime="text/markdown",
-            use_container_width=True,
-        )
+    col_pdf, col_share = st.columns([3, 2])
 
     with col_pdf:
         st.download_button(
