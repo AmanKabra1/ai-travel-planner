@@ -46,10 +46,9 @@ st.markdown("""
 
 [data-testid="stAppViewContainer"]   { background: #060d1f; }
 [data-testid="stSidebar"]            { background: #0a1628; border-right: 1px solid #1a3a6b; }
-[data-testid="stHeader"]             { background: #060d1f !important; border-bottom: 1px solid #0f2341 !important; }
-[data-testid="stMainBlockContainer"] { padding-top: 3.5rem !important; }
+[data-testid="stHeader"]             { background: #060d1f !important; border-bottom: none !important; height: 0 !important; min-height: 0 !important; padding: 0 !important; }
+[data-testid="stMainBlockContainer"] { padding-top: 1rem !important; }
 [data-testid="stBottom"]             { background: #060d1f; }
-[data-testid="stDecoration"]         { display: none; }
 .stApp { background: #060d1f; }
 
 /* ── Hero ── */
@@ -383,18 +382,21 @@ hr { border-color: #1a3a6b !important; }
 summary { color: #64748b !important; }
 summary:hover { color: #94a3b8 !important; }
 
-/* ── Hide ALL Streamlit chrome (toolbar, status, menu, footer, deploy button) ── */
+/* ── Hide Streamlit chrome: running dot, three-dot menu, deploy/fork buttons, footer ── */
 [data-testid="stStatusWidget"]      { display: none !important; }
 [data-testid="stToolbar"]           { display: none !important; }
 [data-testid="stDecoration"]        { display: none !important; }
-[data-testid="stHeader"]            { display: none !important; }
+[data-testid="stToolbarActionButton"] { display: none !important; }
 #MainMenu                           { display: none !important; }
 footer                              { display: none !important; }
 footer:after                        { display: none !important; }
-/* GitHub/Fork/Deploy top-right buttons */
 .stDeployButton                     { display: none !important; }
 [data-testid="stAppDeployButton"]   { display: none !important; }
 button[kind="header"]               { display: none !important; }
+/* Hide any remaining top-right icon buttons inside the header */
+[data-testid="stHeader"] button,
+[data-testid="stHeader"] a,
+[data-testid="stHeader"] svg        { display: none !important; }
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

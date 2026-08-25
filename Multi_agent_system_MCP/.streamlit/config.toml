@@ -8,4 +8,4 @@ gatherUsageStats = false
 
 [client]
 showErrorDetails = false
-toolbarMode = "minimal"
+toolbarMode = "viewer"
