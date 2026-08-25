@@ -61,6 +61,21 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ── Timezone auto-detect: inject JS once to set ?tz= query param ──────────────
+if not st.query_params.get("tz"):
+    import streamlit.components.v1 as _stc_tz
+    _stc_tz.html("""
+<script>
+(function(){
+    var tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    var u  = new URL(window.parent.location.href);
+    if (!u.searchParams.has('tz')) {
+        u.searchParams.set('tz', tz);
+        window.parent.location.replace(u.toString());
+    }
+})();
+</script>""", height=0)
+
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -1626,47 +1641,7 @@ if _is_busy:
 </style>
 """, unsafe_allow_html=True)
 
-if _is_running:
-    st.markdown("""
-<style>
-@keyframes bar-slide {
-    0%   { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-</style>
-<div style="
-    background: linear-gradient(135deg, #0c1f38 0%, #062040 100%);
-    border: 1px solid #0369a1; border-radius: 16px;
-    padding: 1.6rem 2rem 1.4rem; margin-bottom: 1.2rem;
-    text-align: center; position: relative; overflow: hidden;
-">
-  <div style="
-      position: absolute; top: 0; left: 0; right: 0; height: 3px;
-      background: linear-gradient(90deg, #0369a1, #0ea5e9, #06b6d4, #67e8f9, #0369a1);
-      background-size: 200% 100%;
-      animation: bar-slide 1.6s linear infinite;
-  "></div>
-
-  <div style="
-      width: 40px; height: 40px; border-radius: 50%;
-      border: 3px solid #1a3a6b; border-top-color: #0ea5e9;
-      animation: spin 0.9s linear infinite;
-      margin: 0 auto 0.9rem;
-  "></div>
-
-  <div style="color:#7dd3fc; font-size:1.1rem; font-weight:700; margin-bottom:0.35rem;">
-      ✈️ &nbsp;Building Your Travel Plan…
-  </div>
-  <div style="color:#475569; font-size:0.83rem; line-height:1.6;">
-      Flights &amp; Trains &amp; Buses &nbsp;·&nbsp; Hotels &nbsp;·&nbsp; Weather &nbsp;·&nbsp;
-      Nearby attractions &nbsp;·&nbsp; Budget &nbsp;·&nbsp; Itinerary<br>
-      <span style="color:#334155; font-size:0.78rem;">
-          All inputs are locked. This usually takes 30–60 seconds.
-      </span>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+# (Building banner moved into the Itinerary tab — see tab_itin below)
 
 
 # Defaults (overridden inside the form when it is shown)
@@ -1978,85 +1953,8 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "hotel_results
     m3.metric("Duration",      duration)
     m4.metric("Status",        status_label)
 
-    # ── Final generation phase (triggered after user clicks Generate) ────────────
     _gen_final = st.session_state.get("generating_final", False)
-    if _gen_final:
-        _pc = st.session_state.pop("pending_choices", None)
-        if _pc:
-            with st.spinner("Crafting your personalised day-by-day itinerary…"):
-                try:
-                    _final_r = app.invoke(Command(resume=_pc), config=config)
-                    st.session_state["latest_result"]        = _final_r
-                    st.session_state["waiting_for_approval"] = False
-                except Exception as _exc:
-                    st.error(f"Itinerary generation failed: {_exc}")
-            st.session_state["generating_final"] = False
-            st.rerun()
-
-    # ── Approval panel ABOVE tabs (visible from all tabs while waiting) ─────────
-    if st.session_state.get("waiting_for_approval") and not _gen_final:
-        _apr_res = st.session_state.get("latest_result", {}) or {}
-        st.markdown(
-            '<div class="approval-box">'
-            '<div class="approval-title">Research complete — choose your preferences</div>'
-            '<div class="approval-sub">'
-            'We found transport, hotels, weather &amp; nearby attractions. '
-            'Browse the tabs below to review results, make your selections here, then generate.'
-            '</div>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-        _tr = _apr_res.get("transport_results", "") or ""
-        _ht = _apr_res.get("hotel_results", "") or ""
-
-        # Always show all transport modes — agent covers flights, trains, buses & drive
-        _transport_options = ["Flight", "Train", "Bus", "Self-drive / Car rental", "No preference"]
-        _ex1, _ex2 = st.columns(2)
-        with _ex1:
-            if _tr:
-                with st.expander("🚀 Transport options found — review", expanded=False):
-                    st.markdown(_tr[:3000] + ("…" if len(_tr) > 3000 else ""))
-        with _ex2:
-            if _ht:
-                with st.expander("🏨 Hotel options found — review", expanded=False):
-                    st.markdown(_ht[:2500] + ("…" if len(_ht) > 2500 else ""))
-
-        _c1, _c2 = st.columns(2)
-        with _c1:
-            ch_transport = st.radio(
-                "Which transport mode do you prefer?",
-                _transport_options, horizontal=False,
-            )
-            ch_food = st.radio(
-                "Dietary preference?",
-                ["Vegetarian", "Non-vegetarian", "No preference"],
-                horizontal=False,
-                help="Vegetarian filters hotels & meals to pure-veg only.",
-            )
-        with _c2:
-            ch_hotel = st.radio(
-                "Hotel budget tier?",
-                ["Budget  (< Rs.2,000/night)", "Mid-range  (Rs.2,000–5,000)", "Premium  (Rs.5,000+)"],
-                horizontal=False,
-            )
-            ch_style = st.radio(
-                "Travel style?",
-                ["Explorer (lots of sightseeing)", "Relaxed (slow pace)", "Foodie (local cuisine focus)", "Cultural / Spiritual"],
-                horizontal=False,
-            )
-        ch_special = st.text_input(
-            "Any special requests? (optional)",
-            placeholder="Wheelchair access, halal food, honeymoon couple…",
-        )
-        if st.button("Generate My Personalised Itinerary", type="primary", use_container_width=True):
-            _choices = {
-                "transport": ch_transport, "hotel": ch_hotel,
-                "food": ch_food, "style": ch_style, "special_requests": ch_special,
-            }
-            st.session_state["user_choices_display"] = _choices
-            st.session_state["pending_choices"]      = _choices
-            st.session_state["generating_final"]     = True
-            st.rerun()
+    # (All generation/approval UI is inside the Itinerary tab below)
 
     # ── Tabs (research results) ───────────────────────────────────────────────
     tab_tr, tab_ht, tab_wx, tab_nb, tab_bud, tab_itin = st.tabs(
@@ -2101,8 +1999,22 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "hotel_results
         else:
             st.markdown('<div class="tip-card"><div class="tip-card-text">Budget breakdown will appear here. Mention your budget in the request for a cost estimate.</div></div>', unsafe_allow_html=True)
 
-    # ── Itinerary tab — shows final plan after generation ──────────────────────
+    # ── Itinerary tab — all plan states (building / approval / itinerary) ────────
     with tab_itin:
+        # ── Final generation in progress ─────────────────────────────────────
+        if _gen_final:
+            _pc = st.session_state.pop("pending_choices", None)
+            if _pc:
+                with st.spinner("✍️  Crafting your personalised day-by-day itinerary…"):
+                    try:
+                        _final_r = app.invoke(Command(resume=_pc), config=config)
+                        st.session_state["latest_result"]        = _final_r
+                        st.session_state["waiting_for_approval"] = False
+                    except Exception as _exc:
+                        st.error(f"Itinerary generation failed: {_exc}")
+                st.session_state["generating_final"] = False
+                st.rerun()
+
         _final = st.session_state.get("latest_result") or {}
         if _final.get("final_response"):
             _dest_lbl = (_final.get("trip_constraints") or {}).get("destination", "your destination")
@@ -2164,5 +2076,56 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "hotel_results
 
         elif _final.get("itinerary"):
             st.markdown(_final["itinerary"])
-        elif st.session_state.get("waiting_for_approval"):
-            st.info("Use the panel above the tabs to set your preferences, then click Generate.")
+        elif st.session_state.get("waiting_for_approval") and not _gen_final:
+            # ── Approval form lives here so the user sees it immediately ──────
+            _apr_res = st.session_state.get("latest_result", {}) or {}
+            st.markdown(
+                '<div class="approval-box">'
+                '<div class="approval-title">Research complete — choose your preferences</div>'
+                '<div class="approval-sub">'
+                'Review findings in the other tabs, set your preferences below, then generate.'
+                '</div></div>',
+                unsafe_allow_html=True,
+            )
+            _tr2 = _apr_res.get("transport_results", "") or ""
+            _ht2 = _apr_res.get("hotel_results", "") or ""
+            _ex1, _ex2 = st.columns(2)
+            with _ex1:
+                if _tr2:
+                    with st.expander("🚀 Transport options — review", expanded=False):
+                        st.markdown(_tr2[:3000] + ("…" if len(_tr2) > 3000 else ""))
+            with _ex2:
+                if _ht2:
+                    with st.expander("🏨 Hotel options — review", expanded=False):
+                        st.markdown(_ht2[:2500] + ("…" if len(_ht2) > 2500 else ""))
+
+            _transport_opts = ["Flight", "Train", "Bus", "Self-drive / Car rental", "No preference"]
+            _ia1, _ia2 = st.columns(2)
+            with _ia1:
+                ch_transport = st.radio("Which transport mode do you prefer?",
+                                        _transport_opts, key="apr_transport")
+                ch_food = st.radio("Dietary preference?",
+                                   ["Vegetarian", "Non-vegetarian", "No preference"],
+                                   key="apr_food",
+                                   help="Vegetarian filters hotels & meals to pure-veg only.")
+            with _ia2:
+                ch_hotel = st.radio("Hotel budget tier?",
+                                    ["Budget  (< Rs.2,000/night)", "Mid-range  (Rs.2,000–5,000)", "Premium  (Rs.5,000+)"],
+                                    key="apr_hotel")
+                ch_style = st.radio("Travel style?",
+                                    ["Explorer (lots of sightseeing)", "Relaxed (slow pace)",
+                                     "Foodie (local cuisine focus)", "Cultural / Spiritual"],
+                                    key="apr_style")
+            ch_special = st.text_input("Any special requests? (optional)",
+                                       placeholder="Wheelchair access, halal food, honeymoon couple…",
+                                       key="apr_special")
+            if st.button("Generate My Personalised Itinerary", type="primary",
+                         use_container_width=True, key="apr_generate"):
+                _choices = {
+                    "transport": ch_transport, "hotel": ch_hotel,
+                    "food": ch_food, "style": ch_style, "special_requests": ch_special,
+                }
+                st.session_state["user_choices_display"] = _choices
+                st.session_state["pending_choices"]      = _choices
+                st.session_state["generating_final"]     = True
+                st.rerun()
