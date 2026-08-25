@@ -367,35 +367,33 @@ General transport search:
 
 Return a clean markdown guide with these sections:
 
-## ✈️ Flights
-Mention if any direct/connecting flight exists for this route.
-
 ## 🚂 Trains
 ### Direct Trains
 List every direct train found: name/number, departure time, arrival time, duration, fare (sleeper/3AC/2AC), [Book on IRCTC](https://www.irctc.co.in)
-### Connecting Trains (if no direct)
+### Connecting Trains (change at junction)
 If there is no direct train, show the best via-route:
-- Leg 1: [Train Name] — Origin → Junction City — depart HH:MM, arrive HH:MM, X hrs, Rs. Y (class)
-- Leg 2: [Train Name] — Junction City → Destination — depart HH:MM, arrive HH:MM, X hrs, Rs. Y (class)
+- Leg 1: [Train Name] — Origin → Junction City — depart HH:MM, arrive HH:MM, X hrs, Rs. Y
+- Leg 2: [Train Name] — Junction City → Destination — depart HH:MM, arrive HH:MM, X hrs, Rs. Y
 - Total journey time including connection wait
-- [Book Leg 1 on IRCTC](https://www.irctc.co.in) | [Book Leg 2 on IRCTC](https://www.irctc.co.in)
+- [Book on IRCTC](https://www.irctc.co.in)
 
 ## 🚌 Buses
-List direct buses AND multi-leg bus options:
+List direct buses AND via-route options if no direct:
 - Operator with [Book Now](URL), departure time, duration, fare
-- If no direct bus: show via-route (e.g. City A → City B → City C)
+- Show via-route clearly: City A → City B → City C
 
 ## 🚗 Self-Drive / Cab
-- Approximate road distance (km) and drive time
+- Road distance (km) and drive time
 - Highway route (e.g. NH-X via City Y)
-- Estimated fuel cost + toll cost
-- Ola/Uber inter-city option if available
+- Estimated fuel + toll cost
+- Ola/Uber inter-city if available
 
-## 💡 Best Option Summary
-One-line recommendation for each budget tier (budget / mid / premium).
+## 💡 Best Option by Budget
+- Budget: [recommendation]
+- Mid-range: [recommendation]
+- Premium: [recommendation]
 
-Use real train names and numbers from the search results. For Indian routes, always mention IRCTC for booking.
-Do not output raw JSON.
+Use real train names and numbers. For Indian routes always link IRCTC. Do not output raw JSON.
 """,
     )
 

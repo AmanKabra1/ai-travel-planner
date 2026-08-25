@@ -35,6 +35,7 @@ ROUTE_MAP = {
     "nearby_agent":    "nearby_agent",
     "budget_agent":    "budget_agent",
     "itinerary_agent": "itinerary_agent",
+    "human_approval":  "human_approval",   # must be here or routing silently fails
 }
 
 

@@ -471,7 +471,7 @@ summary:hover { color: #94a3b8 !important; }
 _PIPELINE = [
     ("🗺️", "Planning",   "supervisor_reasoning"),
     ("✈️", "Flights",    "flight_results"),
-    ("🚂", "Transport",  "transport_results"),
+    ("🚂", "Transport",   "transport_results"),
     ("🏨", "Hotels",     "hotel_results"),
     ("🌤️", "Weather",   "weather_results"),
     ("📍", "Nearby",     "nearby_results"),
@@ -1487,7 +1487,7 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_result
     m4.metric("Status",        status_label)
 
     tab_fl, tab_tr, tab_ht, tab_wx, tab_nb, tab_bud, tab_itin = st.tabs(
-        ["✈️  Flights", "🚂  Trains & Buses", "🏨  Hotels", "🌤️  Weather", "📍  Nearby", "💰  Budget", "📋  Itinerary"]
+        ["✈️  Flights", "🚂  Transport", "🏨  Hotels", "🌤️  Weather", "📍  Nearby", "💰  Budget", "📋  Itinerary"]
     )
     with tab_fl:
         content = result.get("flight_results")
@@ -1504,7 +1504,7 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "flight_result
             st.markdown(content)
         else:
             st.markdown(
-                '<div class="tip-card"><div class="tip-card-text">Train and bus options were not included in this plan.</div></div>',
+                '<div class="tip-card"><div class="tip-card-text">Transport options (trains, buses, self-drive) will appear here. Make sure you entered a departure city in the "From" field.</div></div>',
                 unsafe_allow_html=True,
             )
     with tab_ht:
