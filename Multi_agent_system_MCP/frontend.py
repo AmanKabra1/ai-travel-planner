@@ -212,6 +212,8 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus {
 }
 /* Catch inline-style red borders Streamlit injects on validation */
 input:focus { outline: none !important; }
+/* Hide "No results" in multiselect when all options are already chosen */
+[data-baseweb="menu"] li:only-child { display: none !important; }
 input:invalid, input[aria-invalid="true"],
 textarea:invalid { border-color: #1a3a6b !important; box-shadow: none !important; }
 /* Nuke any remaining red with an attribute-value wildcard */
@@ -1467,150 +1469,156 @@ if _is_running:
 """, unsafe_allow_html=True)
 
 
-# ── Quick destinations ────────────────────────────────────────────────────────
-st.markdown('<div class="chips-label">Popular Destinations — click to fill To field</div>', unsafe_allow_html=True)
-clicked_dest = None
-for row in [_QUICK_DESTINATIONS[:5], _QUICK_DESTINATIONS[5:]]:
-    chip_cols = st.columns(5)
-    for i, (flag, dest) in enumerate(row):
-        with chip_cols[i]:
-            if st.button(f"{flag} {dest}", key=f"chip_{dest}",
-                         use_container_width=True, disabled=_is_running):
-                clicked_dest = dest
+# Defaults (overridden inside the form when it is shown)
+run   = False
+query = ""
 
-if clicked_dest:
-    st.session_state["to_input"] = clicked_dest
-
-
-# ── From / To route row ───────────────────────────────────────────────────────
-col_from, col_arrow, col_to = st.columns([10, 1, 10])
-with col_from:
-    st.markdown('<div class="route-label">🛫 From — Departure city</div>', unsafe_allow_html=True)
-    origin = st.text_input(
-        "From", key="from_input",
-        placeholder="e.g. Mumbai, London, New York",
-        label_visibility="collapsed",
-        disabled=_is_running,
+# Determine whether to show the input form
+_saved_result       = st.session_state.get("latest_result")
+_result_has_content = bool(_saved_result and any(
+    _saved_result.get(k) for k in (
+        "supervisor_reasoning", "hotel_results",
+        "transport_results", "itinerary", "final_response",
     )
-with col_arrow:
+))
+_show_form = not _is_running and not _result_has_content
+
+if _show_form:
+    # ── Quick destinations ────────────────────────────────────────────────────
+    st.markdown('<div class="chips-label">Popular Destinations — click to fill To field</div>', unsafe_allow_html=True)
+    clicked_dest = None
+    for row in [_QUICK_DESTINATIONS[:5], _QUICK_DESTINATIONS[5:]]:
+        chip_cols = st.columns(5)
+        for i, (flag, dest) in enumerate(row):
+            with chip_cols[i]:
+                if st.button(f"{flag} {dest}", key=f"chip_{dest}",
+                             use_container_width=True, disabled=_is_running):
+                    clicked_dest = dest
+
+    if clicked_dest:
+        st.session_state["to_input"] = clicked_dest
+
+    # ── From / To route row ───────────────────────────────────────────────────
+    col_from, col_arrow, col_to = st.columns([10, 1, 10])
+    with col_from:
+        st.markdown('<div class="route-label">🛫 From — Departure city</div>', unsafe_allow_html=True)
+        st.text_input(
+            "From", key="from_input",
+            placeholder="e.g. Mumbai, London, New York",
+            label_visibility="collapsed",
+        )
+    with col_arrow:
+        st.markdown(
+            "<div style='text-align:center;padding-top:1.55rem;color:#0ea5e9;"
+            "font-size:1.5rem;user-select:none'>→</div>",
+            unsafe_allow_html=True,
+        )
+    with col_to:
+        st.markdown('<div class="route-label">🛬 To — Destination</div>', unsafe_allow_html=True)
+        st.text_input(
+            "To", key="to_input",
+            placeholder="e.g. Tokyo, Paris, Bali",
+            label_visibility="collapsed",
+        )
+
+    # ── Dates · Members · Transport ───────────────────────────────────────────
+    col_s, col_e, col_m, col_tp = st.columns([3, 3, 2, 3])
+    with col_s:
+        st.markdown('<div class="route-label">📅 Departure Date</div>', unsafe_allow_html=True)
+        start_date = st.date_input(
+            "start_date", key="start_date",
+            value=date.today(),
+            label_visibility="collapsed",
+        )
+    with col_e:
+        st.markdown('<div class="route-label">📅 Return Date</div>', unsafe_allow_html=True)
+        end_date = st.date_input(
+            "end_date", key="end_date",
+            value=date.today() + timedelta(days=5),
+            min_value=start_date,
+            label_visibility="collapsed",
+        )
+    with col_m:
+        st.markdown('<div class="route-label">👥 Travellers</div>', unsafe_allow_html=True)
+        st.number_input(
+            "members", key="n_members",
+            min_value=1, max_value=20, value=2,
+            label_visibility="collapsed",
+        )
+    with col_tp:
+        st.markdown('<div class="route-label">🚀 Main Transport</div>', unsafe_allow_html=True)
+        st.selectbox(
+            "transport_pref", key="transport_pref",
+            options=["Mixed (Auto)", "Flight", "Train", "Bus", "Car / Self-drive"],
+            label_visibility="collapsed",
+        )
+
+    # Interests — label row with Select All / Clear buttons
+    _ALL_INTERESTS = [
+        "Temples & Heritage", "Nature & Outdoors", "Food & Street Food",
+        "Shopping & Markets", "Adventure Sports", "Art & Museums",
+        "Beach & Water", "Wellness & Spa", "Nightlife & Entertainment", "Photography",
+    ]
+    _int_lbl, _int_all, _int_clr = st.columns([5, 1, 1])
+    with _int_lbl:
+        st.markdown('<div class="route-label" style="margin-top:0.5rem">🎯 Interests (optional)</div>', unsafe_allow_html=True)
+    with _int_all:
+        if st.button("Select All", key="sel_all_interests", use_container_width=True):
+            st.session_state["interests"] = list(_ALL_INTERESTS)
+            st.rerun()
+    with _int_clr:
+        if st.button("Clear", key="clr_interests", use_container_width=True):
+            st.session_state["interests"] = []
+            st.rerun()
+
+    st.multiselect(
+        "interests", key="interests",
+        options=_ALL_INTERESTS,
+        placeholder="Select your travel interests…",
+        label_visibility="collapsed",
+    )
+
+    # ── Travel details textarea ───────────────────────────────────────────────
+    query = st.text_area(
+        "Travel details",
+        placeholder=(
+            "Budget, hotel preference, must-do activities, dietary needs…\n"
+            "Example: Budget ₹1.5 lakh per person, love street food, prefer mid-range hotels, no overnight trains."
+        ),
+        height=90,
+        label_visibility="collapsed",
+    )
+
+    # ── Travel style quick-select ─────────────────────────────────────────────
     st.markdown(
-        "<div style='text-align:center;padding-top:1.55rem;color:#0ea5e9;"
-        "font-size:1.5rem;user-select:none'>→</div>",
+        '<div class="chips-label" style="margin-top:0.6rem">Travel Style</div>',
         unsafe_allow_html=True,
     )
-with col_to:
-    st.markdown('<div class="route-label">🛬 To — Destination</div>', unsafe_allow_html=True)
-    destination = st.text_input(
-        "To", key="to_input",
-        placeholder="e.g. Tokyo, Paris, Bali",
-        label_visibility="collapsed",
-        disabled=_is_running,
-    )
+    for row in [_TRAVEL_STYLES[:4], _TRAVEL_STYLES[4:]]:
+        style_cols = st.columns(4)
+        for i, (icon, style) in enumerate(row):
+            with style_cols[i]:
+                if st.button(f"{icon} {style}", key=f"style_{style}",
+                             use_container_width=True):
+                    st.session_state["_append_style"] = style
 
+    if st.session_state.get("_append_style"):
+        st.session_state.pop("_append_style")
 
-# ── Dates · Members · Transport ───────────────────────────────────────────────
-col_s, col_e, col_m, col_tp = st.columns([3, 3, 2, 3])
-with col_s:
-    st.markdown('<div class="route-label">📅 Departure Date</div>', unsafe_allow_html=True)
-    start_date = st.date_input(
-        "start_date", key="start_date",
-        value=date.today(),
-        label_visibility="collapsed", disabled=_is_running,
-    )
-with col_e:
-    st.markdown('<div class="route-label">📅 Return Date</div>', unsafe_allow_html=True)
-    end_date = st.date_input(
-        "end_date", key="end_date",
-        value=date.today() + timedelta(days=5),
-        min_value=start_date,
-        label_visibility="collapsed", disabled=_is_running,
-    )
-with col_m:
-    st.markdown('<div class="route-label">👥 Travellers</div>', unsafe_allow_html=True)
-    members = st.number_input(
-        "members", key="n_members",
-        min_value=1, max_value=20, value=2,
-        label_visibility="collapsed", disabled=_is_running,
-    )
-with col_tp:
-    st.markdown('<div class="route-label">🚀 Main Transport</div>', unsafe_allow_html=True)
-    transport_pref = st.selectbox(
-        "transport_pref", key="transport_pref",
-        options=["Mixed (Auto)", "Flight", "Train", "Bus", "Car / Self-drive"],
-        label_visibility="collapsed", disabled=_is_running,
-    )
-
-# Interests — label row with Select All / Clear buttons
-_ALL_INTERESTS = [
-    "Temples & Heritage", "Nature & Outdoors", "Food & Street Food",
-    "Shopping & Markets", "Adventure Sports", "Art & Museums",
-    "Beach & Water", "Wellness & Spa", "Nightlife & Entertainment", "Photography",
-]
-_int_lbl, _int_all, _int_clr = st.columns([5, 1, 1])
-with _int_lbl:
-    st.markdown('<div class="route-label" style="margin-top:0.5rem">🎯 Interests (optional)</div>', unsafe_allow_html=True)
-with _int_all:
-    if st.button("Select All", key="sel_all_interests", disabled=_is_running, use_container_width=True):
-        st.session_state["interests"] = list(_ALL_INTERESTS)
-        st.rerun()
-with _int_clr:
-    if st.button("Clear", key="clr_interests", disabled=_is_running, use_container_width=True):
-        st.session_state["interests"] = []
-        st.rerun()
-
-interests = st.multiselect(
-    "interests", key="interests",
-    options=_ALL_INTERESTS,
-    placeholder="Select your travel interests…",
-    label_visibility="collapsed",
-    disabled=_is_running,
-)
-
-
-# ── Travel details textarea ───────────────────────────────────────────────────
-query = st.text_area(
-    "Travel details",
-    placeholder=(
-        "Budget, hotel preference, must-do activities, dietary needs…\n"
-        "Example: Budget ₹1.5 lakh per person, love street food, prefer mid-range hotels, no overnight trains."
-    ),
-    height=90,
-    label_visibility="collapsed",
-    disabled=_is_running,
-)
-
-
-# ── Travel style quick-select ─────────────────────────────────────────────────
-st.markdown(
-    '<div class="chips-label" style="margin-top:0.6rem">Travel Style</div>',
-    unsafe_allow_html=True,
-)
-for row in [_TRAVEL_STYLES[:4], _TRAVEL_STYLES[4:]]:
-    style_cols = st.columns(4)
-    for i, (icon, style) in enumerate(row):
-        with style_cols[i]:
-            if st.button(f"{icon} {style}", key=f"style_{style}",
-                         use_container_width=True, disabled=_is_running):
-                st.session_state["_append_style"] = style
-
-if st.session_state.get("_append_style"):
-    st.session_state.pop("_append_style")
-
-
-# ── Run button ────────────────────────────────────────────────────────────────
-col_btn, col_hint = st.columns([2, 5])
-with col_btn:
-    run = st.button(
-        "✈️  Create My Travel Plan" if not _is_running else "⏳  Working…",
-        type="primary", use_container_width=True, disabled=_is_running,
-    )
-with col_hint:
-    st.markdown(
-        "<div style='padding-top:0.65rem;color:#334155;font-size:0.83rem'>"
-        "We research flights, hotels &amp; weather first — then you choose before we build your itinerary."
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    # ── Run button ────────────────────────────────────────────────────────────
+    col_btn, col_hint = st.columns([2, 5])
+    with col_btn:
+        run = st.button(
+            "✈️  Create My Travel Plan",
+            type="primary", use_container_width=True,
+        )
+    with col_hint:
+        st.markdown(
+            "<div style='padding-top:0.65rem;color:#334155;font-size:0.83rem'>"
+            "We research flights, hotels &amp; weather first — then you choose before we build your itinerary."
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
 
 # ── Stage 1: Button clicked → save inputs, set running, rerun ─────────────────
