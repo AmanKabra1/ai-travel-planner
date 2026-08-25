@@ -65,6 +65,20 @@ GROQ_FALLBACKS = [
 
 _PREFER_KEYWORDS  = ["70b", "maverick", "scout", "versatile", "qwq", "deepseek", "compound"]
 _EXCLUDE_KEYWORDS = ["embed", "whisper", "guard", "tts", "vision"]
+_SMALL_KEYWORDS   = ["8b", "7b", "9b", "gemma2", "3b", "1b"]  # avoid for complex tasks
+
+
+def _model_score(model_id: str) -> int:
+    m = model_id.lower()
+    if any(x in m for x in _EXCLUDE_KEYWORDS):
+        return -1
+    if any(x in m for x in ["maverick", "scout"]):
+        return 10
+    if any(x in m for x in ["70b", "qwq", "deepseek", "compound"]):
+        return 8
+    if any(x in m for x in _SMALL_KEYWORDS):
+        return 1   # too small — usable as last resort only
+    return 5
 
 _log = logging.getLogger(__name__)
 _verified_model: str | None = None
@@ -129,23 +143,25 @@ def _find_working_groq_model() -> str:
 
     live_ids = _fetch_live_model_ids(api_key)
 
-    # Build candidate list: live models first (actual names Groq reports),
-    # then our static fallback list as a backstop.
+    # Build candidate list: live models first, then static fallback list.
+    # Sort by quality score so large capable models are tried first.
     seen: set[str] = set()
     candidates: list[str] = []
     for m in live_ids:
-        if m not in seen:
+        if m not in seen and _model_score(m) >= 0:
             seen.add(m)
             candidates.append(m)
     for m in GROQ_FALLBACKS:
-        if m not in seen:
+        if m not in seen and _model_score(m) >= 0:
             seen.add(m)
             candidates.append(m)
 
-    _log.info("Testing %d model candidates…", len(candidates))
+    candidates.sort(key=_model_score, reverse=True)
+    _log.info("Candidates (sorted by quality): %s", candidates)
+
     for candidate in candidates:
         try:
-            ChatGroq(model=candidate).invoke([_HMsg(content="hi")])
+            ChatGroq(model=candidate, max_tokens=64).invoke([_HMsg(content="hi")])
             _log.info("✅ Verified working Groq model: %s", candidate)
             return candidate
         except Exception as exc:
@@ -155,7 +171,7 @@ def _find_working_groq_model() -> str:
     return candidates[0] if candidates else GROQ_FALLBACKS[0]
 
 
-def get_llm(model: str | None = None) -> ChatGroq:
+def get_llm(model: str | None = None, max_tokens: int = 4096) -> ChatGroq:
     """Return a verified, working ChatGroq instance.
 
     Priority:
@@ -167,7 +183,7 @@ def get_llm(model: str | None = None) -> ChatGroq:
     """
     global _verified_model
     if model:
-        return ChatGroq(model=model)
+        return ChatGroq(model=model, max_tokens=max_tokens, temperature=0.3)
     if _verified_model is None:
         _verified_model = _find_working_groq_model()
-    return ChatGroq(model=_verified_model)
+    return ChatGroq(model=_verified_model, max_tokens=max_tokens, temperature=0.3)

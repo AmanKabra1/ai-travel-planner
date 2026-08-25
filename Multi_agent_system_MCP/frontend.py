@@ -1,7 +1,11 @@
 ﻿import json
 import sys
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -29,6 +33,27 @@ if not st.session_state.get("authenticated"):
             st.session_state["username"]        = _saved
             st.session_state["session_token"]   = _tok
 
+# ── User timezone (set by JS on first load via ?tz= query param) ──────────────
+_raw_tz = st.query_params.get("tz", "UTC")
+try:
+    _USER_TZ = ZoneInfo(_raw_tz)
+except Exception:
+    _USER_TZ = ZoneInfo("UTC")
+
+
+def _fmt_ts(ts_iso: str) -> str:
+    """Convert a UTC ISO timestamp to the user's local time."""
+    if not ts_iso:
+        return "—"
+    try:
+        dt = datetime.fromisoformat(ts_iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local = dt.astimezone(_USER_TZ)
+        return local.strftime("%d %b %Y, %I:%M %p").lstrip("0")
+    except Exception:
+        return ts_iso[:16].replace("T", " ")
+
 st.set_page_config(
     page_title="Wandr — AI Travel Planner",
     page_icon="🌍",
@@ -50,6 +75,11 @@ st.markdown("""
 [data-testid="stMainBlockContainer"] { padding-top: 1rem !important; }
 [data-testid="stBottom"]             { background: #060d1f; }
 .stApp { background: #060d1f; }
+
+/* ── Hide Streamlit Cloud "Manage app" button (bottom-right) ── */
+a[href*="manage=true"],
+[class*="viewerBadge"],
+[data-testid="manage-app-button"] { display: none !important; }
 
 /* ── Hero ── */
 .hero-wrap {
@@ -471,6 +501,17 @@ button[kind="header"]               { display: none !important; }
             });
         });
     }).observe(document.body, { childList: true, subtree: true });
+})();
+
+(function injectTimezone() {
+    try {
+        var params = new URLSearchParams(window.location.search);
+        if (!params.has('tz')) {
+            var tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+            params.set('tz', tz);
+            window.location.search = params.toString();
+        }
+    } catch(e) {}
 })();
 
 </script>
@@ -1281,24 +1322,8 @@ with st.sidebar:
             ts_iso = t["ts"] if t["ts"] else ""
             dot    = "🟢 " if active else ""
 
-            if ts_iso:
-                _sid_safe = tid.replace("-", "_").replace(".", "_")
-                ts_html = (
-                    f'<span id="ts_{_sid_safe}" style="color:#334155;font-size:0.72rem">{ts_iso[:16].replace("T"," ")}</span>'
-                    f'<script>'
-                    f'(function(){{'
-                    f'var el=document.getElementById("ts_{_sid_safe}");'
-                    f'if(!el)return;'
-                    f'try{{var d=new Date("{ts_iso}");'
-                    f'if(!isNaN(d.getTime()))'
-                    f'el.textContent=d.toLocaleDateString(undefined,{{year:"numeric",month:"short",day:"numeric"}})'
-                    f'+" "+d.toLocaleTimeString(undefined,{{hour:"2-digit",minute:"2-digit"}});'
-                    f'}}catch(e){{}}'
-                    f'}})();'
-                    f'</script>'
-                )
-            else:
-                ts_html = '<span style="color:#334155;font-size:0.72rem">—</span>'
+            ts_label = _fmt_ts(ts_iso) if ts_iso else "—"
+            ts_html  = f'<span style="color:#334155;font-size:0.72rem">{ts_label}</span>'
 
             st.markdown(
                 f'<div class="thread-item">'
