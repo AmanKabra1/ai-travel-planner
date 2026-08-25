@@ -33,45 +33,53 @@ def _strip_think(text: str) -> str:
     return _THINK_RE.sub("", text).strip()
 
 
-def _llm_text(system: str, prompt: str) -> str:
-    """Call the LLM with Gemini as primary and Groq as fallback.
+def _extract_content(result) -> str:
+    """Normalize any LLM response to a plain markdown string.
 
-    1. Try Google Gemini Flash (no TPM limits, 1M context window).
-    2. If Gemini fails or is not configured, fall through to Groq retry loop.
-    Strips <think> blocks produced by reasoning models (e.g. DeepSeek R1).
+    Handles both response shapes:
+    - Groq / most LLMs: result.content is a plain str
+    - Gemini 3.6-flash: result.content is a list of typed content blocks
+      (may include "thinking" blocks that should be discarded)
+    """
+    raw = result.content if hasattr(result, "content") else str(result)
+    if isinstance(raw, list):
+        parts = [
+            b.get("text", "") if isinstance(b, dict) else str(b)
+            for b in raw
+            if not (isinstance(b, dict) and b.get("type") == "thinking")
+        ]
+        return "\n\n".join(p for p in parts if p).strip() or str(raw)
+    return str(raw).strip()
+
+
+def _llm_text(system: str, prompt: str) -> str:
+    """Call the best available LLM: Gemini primary, Groq retry-loop fallback.
+
+    Both providers pass through _extract_content() so markdown structure
+    (headers, tables, bullets) is preserved regardless of which model responds.
     """
     global llm
     msgs = [SystemMessage(content=system), HumanMessage(content=prompt)]
 
-    # ── Primary: Google Gemini Flash ──────────────────────────────────────────
+    # ── Primary: Google Gemini Flash (no TPM limit, 1M context) ──────────────
     gemini = get_gemini_llm()
     if gemini is not None:
         try:
-            result = gemini.invoke(msgs)
-            raw = result.content if hasattr(result, "content") else str(result)
-            # Gemini 3.6-flash returns a list of typed content blocks; join with
-            # newlines to preserve markdown headers/tables/bullets.
-            # Skip any "thinking" blocks (chain-of-thought, not the answer).
-            if isinstance(raw, list):
-                text = "\n\n".join(
-                    b.get("text", "") if isinstance(b, dict) else str(b)
-                    for b in raw
-                    if not (isinstance(b, dict) and b.get("type") == "thinking")
-                ).strip() or str(raw)
-            else:
-                text = str(raw)
+            text = _extract_content(gemini.invoke(msgs))
             logger.info("Gemini responded OK (%d chars)", len(text))
             return _strip_think(text)
         except Exception as exc:
             logger.warning("Gemini failed, falling back to Groq: %s", str(exc)[:300])
 
-    # ── Fallback: Groq retry loop ─────────────────────────────────────────────
-    retry_list = get_retry_models()   # live IDs from Groq /models API
+    # ── Fallback: Groq retry loop (tries best models first by quality score) ──
+    retry_list = get_retry_models()
     tried: set[str] = set()
     for _ in range(len(retry_list) + 1):
         current = getattr(llm, "model_name", "") or getattr(llm, "model", "")
         try:
-            return _strip_think(llm.invoke(msgs).content)
+            text = _extract_content(llm.invoke(msgs))
+            logger.info("Groq %s responded OK (%d chars)", current, len(text))
+            return _strip_think(text)
         except Exception as exc:
             tried.add(current)
             exc_str = str(exc)
