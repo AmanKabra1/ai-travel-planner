@@ -816,7 +816,7 @@ def _build_print_html(state: dict) -> str:
 
 def _build_pdf_bytes(state: dict) -> bytes:
     """Generate a professional travel-itinerary PDF using fpdf2."""
-    import re
+    import re, json as _json
     from fpdf import FPDF
     from fpdf.enums import XPos, YPos
 
@@ -1047,15 +1047,112 @@ def _build_pdf_bytes(state: dict) -> bytes:
         pdf.set_text_color(30, 41, 59)
         pdf.ln(1)
 
+    # ── Day-table renderer from itinerary_json ────────────────────────────────
+    def _draw_day_table(pdf, day_data: dict, color):
+        r, g, b = color
+        day_num  = day_data.get("day", "?")
+        day_date = _clean(str(day_data.get("date", "")))
+        acts     = day_data.get("activities") or []
+        meals    = day_data.get("meals") or {}
+        cost     = _clean(str(day_data.get("estimated_day_cost", "")))
+
+        # Day header row
+        pdf.ln(3)
+        y = pdf.get_y()
+        pdf.set_fill_color(r, g, b)
+        pdf.rect(16, y, 178, 9, "F")
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_xy(19, y + 1.5)
+        label = f"Day {day_num}"
+        if day_date:
+            label += f"  |  {day_date}"
+        pdf.cell(172, 6, label, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_x(pdf.l_margin)
+        pdf.ln(1)
+
+        if acts:
+            # Table header
+            COL = [22, 82, 18, 26, 30]  # Time | Activity | Duration | Cost | Notes
+            HDR = ["Time", "Activity", "Duration", "Cost", "Notes"]
+            pdf.set_fill_color(min(255, r+180), min(255, g+180), min(255, b+180))
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.set_text_color(r, g, b)
+            pdf.set_x(16)
+            for i, h in enumerate(HDR):
+                pdf.cell(COL[i], 6, h, border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
+            pdf.ln(6)
+
+            # Table rows
+            for idx, act in enumerate(acts):
+                t    = _clean(str(act.get("time", "")))
+                plc  = _clean(str(act.get("place", "")))
+                dur  = _clean(str(act.get("duration_hrs", "")))
+                fee  = _clean(str(act.get("entry_fee", "")))
+                nt   = _clean(str(act.get("notes", "")))
+
+                fill_bg = (245, 250, 255) if idx % 2 == 0 else (255, 255, 255)
+                pdf.set_fill_color(*fill_bg)
+                pdf.set_text_color(30, 41, 59)
+                pdf.set_font("Helvetica", "B" if not t else "", 8)
+                pdf.set_x(16)
+
+                row_h = 5.5
+                # Time cell with arrow prefix
+                pdf.set_font("Helvetica", "B", 8)
+                pdf.set_text_color(r, g, b)
+                pdf.cell(COL[0], row_h, (f"-> {t}" if t else "->"), border=1, fill=True,
+                         new_x=XPos.RIGHT, new_y=YPos.TOP)
+                pdf.set_font("Helvetica", "", 8)
+                pdf.set_text_color(30, 41, 59)
+                # Activity
+                plc_txt = plc[:38] if plc else "_______________"
+                pdf.cell(COL[1], row_h, plc_txt, border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
+                # Duration
+                dur_txt = (dur + "h") if dur and dur != "—" and "h" not in dur else (dur or "—")
+                pdf.cell(COL[2], row_h, dur_txt[:10], border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
+                # Cost
+                fee_txt = fee if fee else "—"
+                pdf.cell(COL[3], row_h, fee_txt[:14], border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
+                # Notes
+                pdf.cell(COL[4], row_h, nt[:28] if nt else "—", border=1, fill=True,
+                         new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.ln(1)
+
+        # Meals row
+        pdf.set_font("Helvetica", "I", 8.5)
+        pdf.set_text_color(71, 85, 105)
+        pdf.set_x(16)
+        meal_parts = []
+        for slot, key in [("BF", "breakfast"), ("Lunch", "lunch"), ("Dinner", "dinner")]:
+            v = _clean(str(meals.get(key, "")))
+            if v:
+                meal_parts.append(f"{slot}: {v[:35]}")
+        if meal_parts:
+            pdf.multi_cell(178, 5, "  |  ".join(meal_parts))
+        # Day cost
+        if cost:
+            pdf.set_font("Helvetica", "B", 8.5)
+            pdf.set_text_color(r, g, b)
+            pdf.set_x(16)
+            pdf.cell(178, 5, f"Day Budget: {cost} per person", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(2)
+
+    # Parse itinerary_json for structured day tables
+    _itin_json_str = state.get("itinerary_json", "") or ""
+    _itin_data = {}
+    if _itin_json_str.strip():
+        try:
+            _itin_data = _json.loads(_itin_json_str)
+        except Exception:
+            _itin_data = {}
+
     first_section = True
     for title, content in sections:
         if not content or not content.strip():
             continue
 
         color = SECTION_COLORS.get(title, (14, 165, 233))
-        cleaned = _clean(content)
-        if not cleaned.strip():
-            continue
 
         # Smart page break: always new page for first section; after that only if < 45mm left
         if first_section or pdf.get_y() > 252:
@@ -1064,6 +1161,82 @@ def _build_pdf_bytes(state: dict) -> bytes:
             pdf.ln(6)
         first_section = False
         _draw_section_header(pdf, title, color)
+
+        # For the itinerary section: render structured day tables from JSON first
+        if title == "Complete Itinerary" and _itin_data.get("days"):
+            # AI badge
+            pdf.ln(2)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.set_text_color(202, 138, 4)
+            pdf.set_x(pdf.l_margin)
+            pdf.cell(0, 5, "* AI-Generated Itinerary — verify bookings & prices before travel *",
+                     new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.ln(1)
+
+            ts = _itin_data.get("trip_summary", {})
+            if ts.get("total_budget_estimate"):
+                pdf.set_font("Helvetica", "B", 10)
+                pdf.set_text_color(14, 165, 233)
+                pdf.set_x(pdf.l_margin)
+                pdf.cell(0, 6, f"Total Estimate: {_clean(str(ts['total_budget_estimate']))}",
+                         new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.ln(2)
+
+            for day in _itin_data["days"]:
+                if pdf.get_y() > 240:
+                    pdf.add_page()
+                _draw_day_table(pdf, day, color)
+
+            # Budget summary table
+            bd = _itin_data.get("budget_breakdown", {})
+            if bd:
+                if pdf.get_y() > 230:
+                    pdf.add_page()
+                pdf.ln(3)
+                y = pdf.get_y()
+                r2, g2, b2 = (234, 88, 12)
+                pdf.set_fill_color(r2, g2, b2)
+                pdf.rect(16, y, 178, 8, "F")
+                pdf.set_font("Helvetica", "B", 9)
+                pdf.set_text_color(255, 255, 255)
+                pdf.set_xy(19, y + 1)
+                pdf.cell(172, 6, "BUDGET BREAKDOWN", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                _bd_rows = [
+                    ("Transport (to destination)", bd.get("transport_total", "—")),
+                    ("Hotels", bd.get("hotel_total", "—")),
+                    ("Food & dining", bd.get("food_total", "—")),
+                    ("Activities", bd.get("activities_total", "—")),
+                    ("Local transport", bd.get("local_transport_total", "—")),
+                    ("Buffer (10%)", bd.get("buffer_10pct", "—")),
+                ]
+                for idx2, (lbl2, val2) in enumerate(_bd_rows):
+                    bg2 = (245, 250, 255) if idx2 % 2 == 0 else (255, 255, 255)
+                    pdf.set_fill_color(*bg2)
+                    pdf.set_font("Helvetica", "", 8.5)
+                    pdf.set_text_color(30, 41, 59)
+                    pdf.set_x(16)
+                    pdf.cell(120, 5.5, _clean(lbl2), border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
+                    pdf.cell(58, 5.5, _clean(str(val2))[:20], border=1, fill=True,
+                             new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                # Grand total
+                gt = _clean(str(bd.get("grand_total", "")))
+                pp = _clean(str(bd.get("cost_per_person", "")))
+                if gt:
+                    pdf.set_fill_color(14, 165, 233)
+                    pdf.set_font("Helvetica", "B", 9)
+                    pdf.set_text_color(255, 255, 255)
+                    pdf.set_x(16)
+                    lbl_gt = f"GRAND TOTAL  ({_clean(str(members))} pax)"
+                    pdf.cell(120, 6.5, lbl_gt, border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
+                    pdf.cell(58, 6.5, f"{gt}  ({pp}/person)", border=1, fill=True,
+                             new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.ln(4)
+            # Skip prose rendering for itinerary section when we have JSON
+            continue
+
+        cleaned = _clean(content)
+        if not cleaned.strip():
+            continue
 
         pdf.set_font("Helvetica", "", 9.5)
         pdf.set_text_color(30, 41, 59)
@@ -1427,6 +1600,12 @@ _pending_run = st.session_state.pop("pending_run", None)
 _is_running  = st.session_state.get("is_running", False)
 
 if _is_running:
+    # Scroll to the top on every render while running so the banner is always visible
+    import streamlit.components.v1 as _stc_run
+    _stc_run.html(
+        "<script>setTimeout(()=>window.parent.scrollTo({top:0,behavior:'smooth'}),100);</script>",
+        height=0,
+    )
     st.markdown("""
 <style>
 @keyframes bar-slide {
@@ -1785,8 +1964,23 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "hotel_results
     m3.metric("Duration",      duration)
     m4.metric("Status",        status_label)
 
+    # ── Final generation phase (triggered after user clicks Generate) ────────────
+    _gen_final = st.session_state.get("generating_final", False)
+    if _gen_final:
+        _pc = st.session_state.pop("pending_choices", None)
+        if _pc:
+            with st.spinner("Crafting your personalised day-by-day itinerary…"):
+                try:
+                    _final_r = app.invoke(Command(resume=_pc), config=config)
+                    st.session_state["latest_result"]        = _final_r
+                    st.session_state["waiting_for_approval"] = False
+                except Exception as _exc:
+                    st.error(f"Itinerary generation failed: {_exc}")
+            st.session_state["generating_final"] = False
+            st.rerun()
+
     # ── Approval panel ABOVE tabs (visible from all tabs while waiting) ─────────
-    if st.session_state.get("waiting_for_approval"):
+    if st.session_state.get("waiting_for_approval") and not _gen_final:
         _apr_res = st.session_state.get("latest_result", {}) or {}
         st.markdown(
             '<div class="approval-box">'
@@ -1841,20 +2035,13 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "hotel_results
             placeholder="Wheelchair access, halal food, honeymoon couple…",
         )
         if st.button("Generate My Personalised Itinerary", type="primary", use_container_width=True):
-            st.session_state["user_choices_display"] = {
+            _choices = {
                 "transport": ch_transport, "hotel": ch_hotel,
-                "food": ch_food, "style": ch_style, "special": ch_special,
+                "food": ch_food, "style": ch_style, "special_requests": ch_special,
             }
-            with st.spinner("Crafting your personalised day-by-day plan…"):
-                _final_r = app.invoke(
-                    Command(resume={
-                        "transport": ch_transport, "hotel": ch_hotel,
-                        "food": ch_food, "style": ch_style, "special_requests": ch_special,
-                    }),
-                    config=config,
-                )
-            st.session_state["latest_result"]        = _final_r
-            st.session_state["waiting_for_approval"] = False
+            st.session_state["user_choices_display"] = _choices
+            st.session_state["pending_choices"]      = _choices
+            st.session_state["generating_final"]     = True
             st.rerun()
 
     # ── Tabs (research results) ───────────────────────────────────────────────
