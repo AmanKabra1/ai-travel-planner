@@ -157,15 +157,18 @@ Decide which specialist agents are needed for the user request.
 
 Available agents:
 - flight_agent    : flights, airports, airlines, routes, airfare
+- transport_agent : trains, buses, ground transport, overland routes between cities
 - hotel_agent     : hotels, accommodation, neighbourhood guides
 - weather_agent   : weather, climate, seasonal advice, packing
 - nearby_agent    : nearby attractions, temples, parks, local food, points of interest
 - budget_agent    : cost breakdown, affordability, money-saving tips
 - itinerary_agent : always include — produces the actual travel plan
 
+IMPORTANT: If the request mentions both an origin city AND a destination city, ALWAYS include transport_agent to find trains and buses.
+
 Return ONLY JSON:
 {{
-  "selected_agents": ["flight_agent", "hotel_agent", "weather_agent", "nearby_agent", "budget_agent", "itinerary_agent"],
+  "selected_agents": ["flight_agent", "transport_agent", "hotel_agent", "weather_agent", "nearby_agent", "budget_agent", "itinerary_agent"],
   "trip_constraints": {{
     "destination": "",
     "origin": "",
@@ -186,17 +189,35 @@ User request:
     except (ValueError, json.JSONDecodeError) as exc:
         logger.warning("Routing JSON parse failed: %s. Defaulting all agents.", exc)
         parsed = {
-            "selected_agents":  ["flight_agent", "hotel_agent", "weather_agent",
-                                  "nearby_agent", "budget_agent", "itinerary_agent"],
+            "selected_agents":  ["flight_agent", "transport_agent", "hotel_agent",
+                                  "weather_agent", "nearby_agent", "budget_agent",
+                                  "itinerary_agent"],
             "trip_constraints": {},
             "reasoning":        "Default routing (parse error).",
         }
 
     logger.info("Selected agents: %s", parsed.get("selected_agents"))
 
+    # Merge LLM-extracted constraints on top of the frontend-provided ones so that
+    # start_date, end_date, members, transport_mode, interests are never lost.
+    existing_constraints = state.get("trip_constraints", {}) or {}
+    llm_constraints      = parsed.get("trip_constraints", {}) or {}
+    merged_constraints   = dict(existing_constraints)
+    for k, v in llm_constraints.items():
+        if v not in (None, "", [], "Not specified"):
+            merged_constraints[k] = v
+
+    # Force transport_agent when both origin and destination are given
+    selected = parsed.get("selected_agents", [])
+    if merged_constraints.get("origin") and merged_constraints.get("destination"):
+        if "transport_agent" not in selected:
+            # Insert after flight_agent (or at position 1)
+            idx = selected.index("flight_agent") + 1 if "flight_agent" in selected else 1
+            selected.insert(idx, "transport_agent")
+
     return {
-        "selected_agents":      parsed["selected_agents"],
-        "trip_constraints":     parsed.get("trip_constraints", {}),
+        "selected_agents":      selected,
+        "trip_constraints":     merged_constraints,
         "supervisor_reasoning": parsed.get("reasoning", ""),
         "messages":             [AIMessage(content="Supervisor created the agent plan.")],
         "llm_calls":            state.get("llm_calls", 0) + 1,

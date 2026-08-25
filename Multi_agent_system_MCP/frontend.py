@@ -848,22 +848,29 @@ def _build_pdf_bytes(state: dict) -> bytes:
         pdf.set_font("Helvetica", "B", 13)
         pdf.set_text_color(3, 105, 161)
         pdf.set_xy(22, y + 1.5)
-        pdf.cell(0, 7, title)
+        pdf.cell(170, 7, title)        # explicit width — keeps cursor predictable
         pdf.ln(14)
+        pdf.set_x(pdf.l_margin)        # reset X to left margin before body text
 
         pdf.set_font("Helvetica", "", 10)
         pdf.set_text_color(30, 41, 59)
+        eff_w = pdf.w - pdf.l_margin - pdf.r_margin   # ~174 mm
         cleaned = _clean(content)
         for para in cleaned.split("\n"):
             para = para.strip()
             if not para:
                 pdf.ln(3)
                 continue
-            if para.startswith("•"):
-                pdf.set_x(22)
-                pdf.multi_cell(170, 5.5, para)
-            else:
-                pdf.multi_cell(0, 5.5, para)
+            try:
+                if para.startswith("*") or para.startswith("-"):
+                    pdf.set_x(22)
+                    pdf.multi_cell(eff_w - 4, 5.5, para)
+                else:
+                    pdf.set_x(pdf.l_margin)
+                    pdf.multi_cell(eff_w, 5.5, para)
+            except Exception:
+                # If a line still can't fit (e.g. a very long token), skip it
+                pdf.ln(3)
 
     # ── Footer on every page ──
     pdf.set_y(-14)
