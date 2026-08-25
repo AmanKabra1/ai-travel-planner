@@ -1600,12 +1600,6 @@ _pending_run = st.session_state.pop("pending_run", None)
 _is_running  = st.session_state.get("is_running", False)
 
 if _is_running:
-    # Scroll to the top on every render while running so the banner is always visible
-    import streamlit.components.v1 as _stc_run
-    _stc_run.html(
-        "<script>setTimeout(()=>window.parent.scrollTo({top:0,behavior:'smooth'}),100);</script>",
-        height=0,
-    )
     st.markdown("""
 <style>
 @keyframes bar-slide {
@@ -1847,13 +1841,6 @@ if run and not _is_running:
 
 # ── Stage 2: Pending run exists → execute agents ──────────────────────────────
 if _pending_run:
-    # Scroll to top so the user sees the progress status box, not the form
-    import streamlit.components.v1 as _stc
-    _stc.html(
-        "<script>setTimeout(()=>window.parent.scrollTo({top:0,behavior:'smooth'}),80);</script>",
-        height=0,
-    )
-
     enriched_query = _pending_run["enriched_query"]
     _origin        = _pending_run.get("origin", "")
     _dest          = _pending_run.get("dest", "")
