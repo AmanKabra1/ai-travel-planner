@@ -1596,8 +1596,35 @@ config = {"configurable": {"thread_id": st.session_state["thread_id"]}}
 
 
 # ── Detect running state & consume pending run ────────────────────────────────
-_pending_run = st.session_state.pop("pending_run", None)
-_is_running  = st.session_state.get("is_running", False)
+_pending_run    = st.session_state.pop("pending_run", None)
+_is_running     = st.session_state.get("is_running", False)
+_is_busy        = _is_running or bool(st.session_state.get("generating_final", False))
+
+# Block ALL interactions while any generation is in progress
+if _is_busy:
+    st.markdown("""
+<style>
+/* Freeze every interactive element while the plan is building */
+[data-testid="stSidebar"] button,
+[data-testid="stSidebar"] a,
+[data-testid="stSidebarContent"] * { pointer-events: none !important; }
+
+[data-testid="stMain"] button,
+[data-testid="stMain"] input,
+[data-testid="stMain"] textarea,
+[data-testid="stMain"] select,
+[data-testid="stMain"] [role="tab"],
+[data-testid="stMain"] [role="radio"],
+[data-testid="stMain"] [role="checkbox"],
+[data-testid="stMain"] [data-baseweb="select"],
+[data-testid="stMain"] [data-baseweb="input"],
+[data-testid="stMain"] [data-baseweb="tab"] {
+    pointer-events: none !important;
+    opacity: 0.45 !important;
+    cursor: not-allowed !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 if _is_running:
     st.markdown("""
