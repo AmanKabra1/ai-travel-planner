@@ -251,6 +251,13 @@ button p { white-space: nowrap !important; overflow: hidden !important; text-ove
     font-size: 0.73rem; font-weight: 700; letter-spacing: 0.08em;
     text-transform: uppercase; color: #334155; margin-bottom: 3px;
 }
+/* Compact Select All / Clear buttons in interests row */
+div[data-testid="stButton"]:has(button[kind="secondary"]) button[data-testid="baseButton-secondary"] {
+    padding: 2px 8px !important;
+    font-size: 0.7rem !important;
+    height: 26px !important;
+    min-height: 26px !important;
+}
 /* Highlight the from/to inputs differently from the query textarea */
 div[data-testid="stTextInput"]:has(input[aria-label="From"]) input,
 div[data-testid="stTextInput"]:has(input[aria-label="To"]) input {
@@ -1537,13 +1544,27 @@ with col_tp:
         label_visibility="collapsed", disabled=_is_running,
     )
 
-# Interests
-st.markdown('<div class="route-label" style="margin-top:0.5rem">🎯 Interests (optional)</div>', unsafe_allow_html=True)
+# Interests — label row with Select All / Clear buttons
+_ALL_INTERESTS = [
+    "Temples & Heritage", "Nature & Outdoors", "Food & Street Food",
+    "Shopping & Markets", "Adventure Sports", "Art & Museums",
+    "Beach & Water", "Wellness & Spa", "Nightlife & Entertainment", "Photography",
+]
+_int_lbl, _int_all, _int_clr = st.columns([5, 1, 1])
+with _int_lbl:
+    st.markdown('<div class="route-label" style="margin-top:0.5rem">🎯 Interests (optional)</div>', unsafe_allow_html=True)
+with _int_all:
+    if st.button("Select All", key="sel_all_interests", disabled=_is_running, use_container_width=True):
+        st.session_state["interests"] = list(_ALL_INTERESTS)
+        st.rerun()
+with _int_clr:
+    if st.button("Clear", key="clr_interests", disabled=_is_running, use_container_width=True):
+        st.session_state["interests"] = []
+        st.rerun()
+
 interests = st.multiselect(
     "interests", key="interests",
-    options=["Temples & Heritage", "Nature & Outdoors", "Food & Street Food",
-             "Shopping & Markets", "Adventure Sports", "Art & Museums",
-             "Beach & Water", "Wellness & Spa", "Nightlife & Entertainment", "Photography"],
+    options=_ALL_INTERESTS,
     placeholder="Select your travel interests…",
     label_visibility="collapsed",
     disabled=_is_running,
@@ -1643,6 +1664,13 @@ if run and not _is_running:
 
 # ── Stage 2: Pending run exists → execute agents ──────────────────────────────
 if _pending_run:
+    # Scroll to top so the user sees the progress status box, not the form
+    import streamlit.components.v1 as _stc
+    _stc.html(
+        "<script>setTimeout(()=>window.parent.scrollTo({top:0,behavior:'smooth'}),80);</script>",
+        height=0,
+    )
+
     enriched_query = _pending_run["enriched_query"]
     _origin        = _pending_run.get("origin", "")
     _dest          = _pending_run.get("dest", "")
