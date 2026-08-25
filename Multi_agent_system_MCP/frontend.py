@@ -383,11 +383,18 @@ hr { border-color: #1a3a6b !important; }
 summary { color: #64748b !important; }
 summary:hover { color: #94a3b8 !important; }
 
-/* ── Status widget ── */
-[data-testid="stStatusWidget"] {
-    background: #0a1628 !important; border: 1px solid #1a3a6b !important;
-    border-radius: 10px !important;
-}
+/* ── Hide ALL Streamlit chrome (toolbar, status, menu, footer, deploy button) ── */
+[data-testid="stStatusWidget"]      { display: none !important; }
+[data-testid="stToolbar"]           { display: none !important; }
+[data-testid="stDecoration"]        { display: none !important; }
+[data-testid="stHeader"]            { display: none !important; }
+#MainMenu                           { display: none !important; }
+footer                              { display: none !important; }
+footer:after                        { display: none !important; }
+/* GitHub/Fork/Deploy top-right buttons */
+.stDeployButton                     { display: none !important; }
+[data-testid="stAppDeployButton"]   { display: none !important; }
+button[kind="header"]               { display: none !important; }
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
