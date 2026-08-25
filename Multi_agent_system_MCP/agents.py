@@ -319,46 +319,81 @@ def transport_agent(state: TravelState):
 
     route_str = f"{origin} to {destination}" if origin else destination
 
-    try:
-        train_raw = asyncio.run(tavily_search(
-            f"train {route_str} booking schedule tickets site:booking.com OR site:irctc.co.in OR site:raileurope.com OR site:trainline.com"
-        ))
-        train_text = _extract_tavily_with_urls(train_raw)
-    except Exception as exc:
-        logger.warning("Transport train search failed: %s", exc)
-        train_text = "Train search unavailable."
+    def _tsearch(q: str, label: str) -> str:
+        try:
+            raw = asyncio.run(tavily_search(q))
+            return _extract_tavily_with_urls(raw)[:2000]
+        except Exception as exc:
+            logger.warning("Transport search '%s' failed: %s", label, exc)
+            return ""
 
-    try:
-        bus_raw = asyncio.run(tavily_search(
-            f"bus {route_str} booking tickets site:redbus.in OR site:busbud.com OR site:flixbus.com OR site:megabus.com"
-        ))
-        bus_text = _extract_tavily_with_urls(bus_raw)
-    except Exception as exc:
-        logger.warning("Transport bus search failed: %s", exc)
-        bus_text = "Bus search unavailable."
+    # ── Multi-search: direct trains, via-connections, buses, general tips ─────
+    train_direct = _tsearch(
+        f"train {route_str} 2026 direct schedule timing fare IRCTC booking",
+        "train_direct",
+    )
+    train_via = _tsearch(
+        f"how to reach {destination} from {origin} by train 2026 via connecting junction route change",
+        "train_via",
+    )
+    bus_search = _tsearch(
+        f"bus {route_str} 2026 Redbus Abhibus schedule timing booking fare",
+        "bus",
+    )
+    general = _tsearch(
+        f"{route_str} travel options 2026 how to reach fastest cheapest transport",
+        "general",
+    )
 
     result = _llm_text(
-        "You are a ground transport specialist for travel planning.",
-        f"""Summarise train and bus options for this traveller.
+        "You are a ground transport specialist. You always show real schedules, fares, and booking links.",
+        f"""Provide a comprehensive transport guide for this route.
 
-User request:
-{state['user_query']}
-
+User request: {state['user_query']}
 Route: {route_str}
 
-Train search results (with links):
-{train_text[:2500]}
+Direct train search results:
+{train_direct}
 
-Bus search results (with links):
-{bus_text[:2500]}
+Connecting / via-route train results:
+{train_via}
 
-Return a clean markdown summary with two sections: **Trains** and **Buses**.
-For each option include:
-- Operator / service name with a booking link as [Operator Name](URL)
-- Approximate journey time and frequency
-- Indicative fare range
-- Any important tips (advance booking, passes, etc.)
-If trains or buses are not relevant for this route (e.g. international long haul), say so briefly.
+Bus search results:
+{bus_search}
+
+General transport search:
+{general}
+
+Return a clean markdown guide with these sections:
+
+## ✈️ Flights
+Mention if any direct/connecting flight exists for this route.
+
+## 🚂 Trains
+### Direct Trains
+List every direct train found: name/number, departure time, arrival time, duration, fare (sleeper/3AC/2AC), [Book on IRCTC](https://www.irctc.co.in)
+### Connecting Trains (if no direct)
+If there is no direct train, show the best via-route:
+- Leg 1: [Train Name] — Origin → Junction City — depart HH:MM, arrive HH:MM, X hrs, Rs. Y (class)
+- Leg 2: [Train Name] — Junction City → Destination — depart HH:MM, arrive HH:MM, X hrs, Rs. Y (class)
+- Total journey time including connection wait
+- [Book Leg 1 on IRCTC](https://www.irctc.co.in) | [Book Leg 2 on IRCTC](https://www.irctc.co.in)
+
+## 🚌 Buses
+List direct buses AND multi-leg bus options:
+- Operator with [Book Now](URL), departure time, duration, fare
+- If no direct bus: show via-route (e.g. City A → City B → City C)
+
+## 🚗 Self-Drive / Cab
+- Approximate road distance (km) and drive time
+- Highway route (e.g. NH-X via City Y)
+- Estimated fuel cost + toll cost
+- Ola/Uber inter-city option if available
+
+## 💡 Best Option Summary
+One-line recommendation for each budget tier (budget / mid / premium).
+
+Use real train names and numbers from the search results. For Indian routes, always mention IRCTC for booking.
 Do not output raw JSON.
 """,
     )
@@ -486,108 +521,108 @@ def nearby_agent(state: TravelState):
     place_type = geo_meta.get("place_type", "")
     logger.info("Nearby agent — '%s' (%s) coords: %.4f, %.4f", destination, place_type, lat, lon)
 
-    # ── Overpass POIs (auto-expands for sparse/small places) ─────────────────
+    dest_enc = destination.replace(" ", "+")
+    gmaps_base = f"https://www.google.com/maps/search/{dest_enc}"
+
+    # ── Overpass POIs — capped at 8 per bucket to keep prompt compact ────────
     pois    = overpass_nearby(lat, lon, radius_m=100_000)
     buckets = bucket_pois(pois)
     logger.info("Nearby agent — %d POIs found", len(pois))
 
-    # ── Wikivoyage local culture (falls back to region → country) ────────────
+    # ── Wikivoyage ────────────────────────────────────────────────────────────
     wiki_tips = wikivoyage_local_tips(destination, region=region, country=country)
 
-    # ── Tavily searches — broader for small/unknown places ───────────────────
-    tavily_parts: list[str] = []
-
+    # ── Parallel Tavily searches (run sequentially to avoid event-loop issues) ─
     def _tsearch(q: str) -> str:
         try:
             raw = asyncio.run(tavily_search(q))
-            return _extract_tavily_with_urls(raw)[:1800]
+            return _extract_tavily_with_urls(raw)[:1500]
         except Exception as exc:
             logger.warning("Nearby Tavily '%s' failed: %s", q[:50], exc)
             return ""
 
-    if len(pois) < 10:
-        # Small / obscure place — run multiple targeted searches
-        tavily_parts.append(_tsearch(f"top tourist places to visit near {destination} {region} {country}"))
-        tavily_parts.append(_tsearch(f"famous things to do in {destination} travel guide local attractions"))
-        tavily_parts.append(_tsearch(f"local food specialties street food {destination} {country}"))
-    else:
-        tavily_parts.append(_tsearch(f"hidden gem local attractions near {destination} worth visiting"))
-        tavily_parts.append(_tsearch(f"local food specialties {destination}"))
+    # Always run: attractions + food + culture + social/review searches
+    t_attractions = _tsearch(
+        f"best tourist places attractions {destination} {region} 2026 must visit complete guide"
+    )
+    t_food = _tsearch(
+        f"famous food street food restaurants {destination} {region} 2026 local specialties where to eat"
+    )
+    t_hidden = _tsearch(
+        f"hidden gems offbeat places {destination} {region} {country} 2026 travel blog review"
+    )
+    t_tripadvisor = _tsearch(
+        f"tripadvisor {destination} top attractions things to do 2026 reviews"
+    )
 
-    hidden_text = "\n\n".join(t for t in tavily_parts if t)
-
-    # ── LLM format ────────────────────────────────────────────────────────────
-    bucket_summary = "\n\n".join([
-        f"**Within 10 km:**\n{format_pois_text(buckets['within_10km'], 12)}",
-        f"**10 – 30 km away:**\n{format_pois_text(buckets['10_to_30km'], 12)}",
-        f"**30 – 50 km away:**\n{format_pois_text(buckets['30_to_50km'], 12)}",
-        f"**50 – 100 km away:**\n{format_pois_text(buckets['50_to_100km'], 12)}",
+    # ── Compact POI bucket summary (max 8 per bucket) ────────────────────────
+    bucket_summary = "\n".join([
+        f"Within 10km: {format_pois_text(buckets['within_10km'], 8)}",
+        f"10-30km: {format_pois_text(buckets['10_to_30km'], 8)}",
+        f"30-50km: {format_pois_text(buckets['30_to_50km'], 8)}",
+        f"50-100km: {format_pois_text(buckets['50_to_100km'], 8)}",
     ])
 
     wiki_summary = "\n\n".join(
-        f"**{k.title()}:**\n{v[:600]}" for k, v in wiki_tips.items()
-    ) or f"No Wikivoyage page found for {destination} — using web search data below."
+        f"{k.title()}: {v[:400]}" for k, v in wiki_tips.items()
+    ) or f"No Wikivoyage data for {destination}."
 
-    context_note = (
-        f"NOTE: This is a small/lesser-known location in {region}, {country}."
-        if len(pois) < 10 else
-        f"Location: {destination}, {region}, {country}."
-    )
+    web_data = "\n\n---\n\n".join(t for t in [t_attractions, t_food, t_hidden, t_tripadvisor] if t)
 
-    dest_enc = destination.replace(" ", "+")
     result = _llm_text(
-        "You are a knowledgeable local travel expert. Even for small, obscure, or lesser-known places, "
-        "you produce rich, detailed, accurate guides using whatever data is available.",
-        f"""Produce a detailed, vivid guide to {destination} and its surroundings.
+        "You are a local travel expert with 2026 knowledge. Produce a rich, specific, practical guide.",
+        f"""Write a detailed local guide for {destination}, {region}, {country}.
 
-{context_note}
-
-OSM map data grouped by distance from {destination}:
+=== MAP DATA (OpenStreetMap POIs) ===
 {bucket_summary}
 
-Wikivoyage / regional tips:
-{wiki_summary}
+=== WIKIVOYAGE DATA ===
+{wiki_summary[:1200]}
 
-Web search results (may include specific local info for small places):
-{hidden_text[:4000]}
+=== WEB / SOCIAL / REVIEW DATA (2026) ===
+{web_data[:4500]}
 
-Format as clean Markdown with these exact sections:
+Write clean Markdown with these sections:
 
-## 📍 Nearby Attractions by Distance
+## 📍 Attractions by Distance from {destination}
 
-### ≤ 10 km — Right Here
-List every named place found within 10 km. For each:
-- **Name** (category) — X km · Why it's worth visiting / what it's known for
-- [View on Google Maps](https://www.google.com/maps/search/{dest_enc}+attraction)
+### ≤ 10 km — In the City
+For each place: **Name** (type) — brief why worth visiting · entry fee if known
+Add a Google Maps link: [View on Maps]({gmaps_base}+NAME) replacing NAME with the place name.
 
-### 10 – 30 km
-### 30 – 50 km
-### 50 – 100 km
+### 10 – 30 km — Easy Day Trips
 
-(If a distance bucket has no OSM data, mention 2–3 places from the web search.)
+### 30 – 50 km — Half-Day Excursions
 
-## 🍜 Local Food & Specialties
-- Top 5–8 dishes or street foods this region is famous for
-- Where / how to find them (market, roadside stall, specific restaurant if known)
-- Price range
+### 50 – 100 km — Full-Day or Overnight Trips
+
+For each distance band list at least 4–6 specific named places. If OSM data is sparse, use the web search data.
+
+## 🍜 Local Food & Where to Eat
+- 6–8 signature dishes / street foods this place is famous for
+- Specific streets, markets, or eateries where to find each (use real names from search data)
+- Approximate price per person
+- [Find on Google Maps]({gmaps_base}+restaurants)
 
 ## 🛍️ Shopping & Markets
-- Local markets, bazaars, or craft centres
-- What they're known for (textiles, spices, handicrafts…)
-- Best time to visit
+- Specific market names, what they sell, best time to visit, how to bargain
+- [Explore Markets]({gmaps_base}+market)
 
-## 🎭 Culture, Festivals & Traditions
-- What makes this place and its people unique
-- Any festivals, religious events, or seasonal highlights
-- Local customs travellers should know
+## 🎭 Culture, Temples & Festivals
+- Religious / cultural sites with visiting hours and dress code tips
+- Upcoming festivals or seasonal events in 2026
+- Local customs visitors must know
 
-## 💎 Hidden Gems & Local Secrets
-- Spots most tourists never find
-- Offbeat experiences, viewpoints, or local favourites
-- Any insider tips from the web search
+## 🚕 Getting Around Locally
+- Auto-rickshaw / e-rickshaw / tempo rates
+- Local bus routes
+- App-based cabs availability (Ola/Uber/local apps)
+- Approximate daily local transport budget
 
-Be specific and use real place names from the data. If information is limited for this place,
-draw on what's available for the broader region and clearly say so.
+## 💎 Hidden Gems & Insider Tips
+- Off-the-beaten-path spots from the travel blogs / reviews
+- Specific local experiences tourists usually miss
+- Best time of day to visit crowded attractions
 """,
     )
 
@@ -602,37 +637,80 @@ draw on what's available for the broader region and clearly say so.
 
 def budget_agent(state: TravelState):
     logger.info("Budget agent running")
+    constraints = state.get("trip_constraints", {}) or {}
+    destination = constraints.get("destination", "")
+    members     = constraints.get("members", 2)
+
+    # Live 2026 price search for the destination
+    price_data = ""
+    if destination:
+        try:
+            raw = asyncio.run(tavily_search(
+                f"{destination} travel cost 2026 hotel price food budget per day per person India"
+            ))
+            price_data = _extract_tavily_with_urls(raw)[:2000]
+        except Exception as exc:
+            logger.warning("Budget price search failed: %s", exc)
 
     result = _llm_text(
-        "You are a practical travel budget analyst.",
-        f"""Analyse whether this trip plan is realistic for the user's budget.
+        "You are a precise travel budget analyst. Always show per-person AND total-party costs.",
+        f"""Build a detailed 2026 budget breakdown for this trip.
 
-User request:
-{state['user_query']}
+User request: {state['user_query']}
 
-Constraints:
-{state.get('trip_constraints', {})}
+Trip details:
+- Destination: {destination}
+- Travellers: {members}
+- Dates: {constraints.get('start_date','')} to {constraints.get('end_date','')}
+- Duration: {constraints.get('duration', 'see dates')} days
+- Budget preference: {constraints.get('budget', 'not specified')}
 
-Flight info:
-{state.get('flight_results', 'N/A')}
+Live 2026 price data for {destination}:
+{price_data}
 
-Train & bus info:
-{state.get('transport_results', 'N/A')}
+Flight info (use fares from here):
+{state.get('flight_results', 'N/A')[:800]}
 
-Hotel info:
-{state.get('hotel_results', 'N/A')}
+Transport info (use fares from here):
+{state.get('transport_results', 'N/A')[:800]}
 
-Weather info:
-{state.get('weather_results', 'N/A')}
+Hotel info (use prices from here):
+{state.get('hotel_results', 'N/A')[:800]}
 
-Nearby attractions:
-{state.get('nearby_results', 'N/A')[:800]}
+Nearby attractions (use entry fees from here):
+{state.get('nearby_results', 'N/A')[:600]}
 
-Provide:
-1. Estimated cost by category (flights, ground transport, accommodation, food, activities)
-2. Risk areas where costs might blow out
-3. Money-saving tips
-4. Overall feasibility verdict
+Produce a budget breakdown in this exact Markdown format:
+
+## 💰 Budget Breakdown — {destination}
+
+### Per Person Costs
+| Category | Budget Option | Mid-Range | Premium |
+|----------|--------------|-----------|---------|
+| ✈️ Transport (to/from) | Rs. X | Rs. X | Rs. X |
+| 🏨 Hotels (per night × nights) | Rs. X | Rs. X | Rs. X |
+| 🍜 Food (per day × days) | Rs. X | Rs. X | Rs. X |
+| 🎫 Entry fees & activities | Rs. X | Rs. X | Rs. X |
+| 🚕 Local transport (per day) | Rs. X | Rs. X | Rs. X |
+| 🛡️ Miscellaneous & buffer | Rs. X | Rs. X | Rs. X |
+| **TOTAL per person** | **Rs. X** | **Rs. X** | **Rs. X** |
+
+### For {members} Traveller(s)
+| | Budget | Mid-Range | Premium |
+|--|--------|-----------|---------|
+| **Grand Total** | **Rs. X** | **Rs. X** | **Rs. X** |
+
+### 💡 Money-Saving Tips
+1. [specific tip for this destination]
+2. ...
+
+### ⚠️ Budget Risks
+- [what might cost more than expected]
+
+### ✅ Feasibility
+One paragraph on whether the user's stated budget is realistic.
+
+Use real fares from the search data where possible. Label estimates clearly.
 """,
     )
 
