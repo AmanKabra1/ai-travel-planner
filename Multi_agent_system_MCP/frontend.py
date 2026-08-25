@@ -1251,7 +1251,7 @@ with col_e:
     st.markdown('<div class="route-label">📅 Return Date</div>', unsafe_allow_html=True)
     end_date = st.date_input(
         "end_date", key="end_date",
-        value=date.today() + timedelta(days=14),
+        value=date.today() + timedelta(days=5),
         min_value=start_date,
         label_visibility="collapsed", disabled=_is_running,
     )
