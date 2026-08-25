@@ -742,39 +742,28 @@ OUTPUT — exactly TWO blocks separated by ---PROSE---:
 Block 1: valid JSON fenced as ```json
 {"trip_summary":{"from":"","to":"","start_date":"","end_date":"","members":0,"transport_mode":"","total_budget_estimate":""},"hotels":[{"name":"","type":"budget|best_value|premium","price_per_night":"","rating":"","booking_link":"","notes":""}],"days":[{"day":1,"date":"","activities":[{"time":"","place":"","category":"","duration_hrs":"","entry_fee":"","notes":""}],"meals":{"breakfast":"","lunch":"","dinner":""},"estimated_day_cost":""}],"local_food":[{"dish":"","where":"","price_range":""}],"local_markets":[{"name":"","known_for":"","best_time":""}],"nearby_attractions":[{"name":"","category":"","distance_km":"","entry_fee":"","duration_hrs":"","best_time":""}],"transport":{"to_destination":[{"mode":"","cost_per_person":"","duration":"","booking_link":""}],"local":[{"mode":"","cost_per_day":""}]},"budget_breakdown":{"transport_total":"","hotel_total":"","food_total":"","activities_total":"","local_transport_total":"","buffer_10pct":"","grand_total":"","cost_per_person":""}}
 
-Block 2 (after ---PROSE---): Markdown itinerary using this EXACT format for every day — NO prose paragraphs, NO bullet lists, tables ONLY:
+Block 2 (after ---PROSE---): Markdown itinerary — NO prose paragraphs, NO bullet lists. Tables ONLY.
 
-## 🗓 Day N — [Theme Title] | [Date]
+For EVERY day use this format:
+## 🗓 Day N — [Theme] | [Date]
 | 🕐 Time | ➤ Activity | ⏱ Duration | 💰 Cost | 📝 Notes |
 |---------|-----------|------------|---------|---------|
-| 06:30 AM | ➤ Wake-up & freshen up | 30 min | — | — |
-| 07:00 AM | ➤ Breakfast — [dish] @ [restaurant or _______________] | 45 min | Rs.150 | Local tip here |
-| 08:00 AM | ➤ Depart by [transport chosen] to [place] | Xh | Rs.XXX | [train/bus name or _______________] |
-| 10:00 AM | ➤ [Attraction] | 1.5h | Rs.50 | Best visited early |
-| 11:30 AM | ➤ [Next attraction nearby] | 1h | Free | — |
-| 01:00 PM | ➤ Lunch — [dish] @ [restaurant or _______________] | 1h | Rs.250 | Must-try: [dish] |
-| 02:30 PM | ➤ [Afternoon activity] | 2h | Rs.100 | — |
-| 05:00 PM | ➤ [Evening spot / market] | 1h | Free | Bargaining tip: start at 50% |
-| 07:00 PM | ➤ Dinner — [dish] @ [restaurant or _______________] | 1h | Rs.350 | — |
-| 09:00 PM | ➤ Return to hotel [or _______________] | 30 min | Rs.80 | Auto / cab |
-
-**🍽 Meals:** Breakfast: [dish @ place] · Lunch: [dish @ place] · Dinner: [dish @ place]
-**🏨 Stay:** [Hotel name or _______________] · Rs.XXX/night
-**💰 Day Budget (per person):** Rs.XXXX
-
+| 07:00 AM | ➤ Breakfast — [dish] @ [place or _______________] | 45 min | Rs.XX | tip |
+| 08:30 AM | ➤ [Attraction / transport step] | Xh | Rs.XX | [name or _______________] |
+...continue for all time slots...
+**🍽 Meals:** BF: [dish@place] · Lunch: [dish@place] · Dinner: [dish@place]
+**🏨 Stay:** [Hotel or _______________] · Rs.XX/night  **💰 Day Budget:** Rs.XXXX/person
 ---
 
-Repeat this table format for EVERY day. After all days, add the ## 💬 What to Say & Do section.
-Then add a ## 💰 Total Budget Summary table:
-| Item | Per Person | Total (N pax) |
-|------|-----------|--------------|
-| Transport to destination | Rs.XXX | Rs.XXX |
-| Local transport (all days) | Rs.XXX | Rs.XXX |
-| Hotels (N nights) | Rs.XXX | Rs.XXX |
-| Food & dining | Rs.XXX | Rs.XXX |
-| Activities & entry fees | Rs.XXX | Rs.XXX |
-| Buffer (10%) | Rs.XXX | Rs.XXX |
-| **GRAND TOTAL** | **Rs.XXX** | **Rs.XXX** |
+After all days add ## 💬 What to Say & Do, then ## 💰 Total Budget Summary table:
+| Item | Per Person | Total |
+|------|-----------|-------|
+| Transport | Rs.XX | Rs.XX |
+| Hotels | Rs.XX | Rs.XX |
+| Food | Rs.XX | Rs.XX |
+| Activities | Rs.XX | Rs.XX |
+| Buffer 10% | Rs.XX | Rs.XX |
+| **GRAND TOTAL** | **Rs.XX** | **Rs.XX** |
 """.strip()
 
 
@@ -891,73 +880,16 @@ def human_approval_agent(state: TravelState):
     }
 
 
-# ── Final response agent ──────────────────────────────────────────────────────
+# ── Final response agent — pass-through, no extra LLM call ───────────────────
+# The itinerary_agent already produces the complete polished plan. Calling the
+# LLM again here was adding 15-30s latency and risking Groq 8k-token overflows.
 
 def final_response_agent(state: TravelState):
-    approved = state.get("approved", True)
-    logger.info("Final agent — approved=%s", approved)
-
-    user_choices = state.get("user_choices") or {}
-    choices_summary = (
-        f"Transport: {user_choices.get('transport','—')} | "
-        f"Hotel: {user_choices.get('hotel','—')} | "
-        f"Food: {user_choices.get('food','—')} | "
-        f"Style: {user_choices.get('style','—')}"
-    )
-
-    if approved:
-        prompt = f"""The user approved the draft itinerary.
-
-USER'S CONFIRMED PREFERENCES: {choices_summary}
-Special requests: {user_choices.get('special_requests', 'None')}
-
-Produce the final, polished travel plan. Make it beautiful and practical.
-Include hotel booking links and transport booking links where available.
-Ensure the "💬 What to Say & Do" section is present and complete.
-
-Draft itinerary:
-{state.get('itinerary', '')}
-
-Transport options — flights, trains, buses (with links):
-{state.get('transport_results', '')}
-
-Hotel recommendations (with links):
-{state.get('hotel_results', '')}
-
-Budget notes:
-{state.get('budget_results', '')}
-"""
-    else:
-        prompt = f"""The user requested revisions.
-
-Original request:
-{state.get('user_query', '')}
-
-Draft itinerary:
-{state.get('itinerary', '')}
-
-User feedback:
-{state.get('human_feedback', '')}
-
-Transport options — flights, trains, buses (with links):
-{state.get('transport_results', '')}
-
-Hotel recommendations (with links):
-{state.get('hotel_results', '')}
-
-Budget notes:
-{state.get('budget_results', '')}
-
-Revise the itinerary to address the user's feedback. Make it final and polished.
-Include clickable links for hotels and transport bookings.
-Ensure the "💬 What to Say & Do" section is present and complete.
-"""
-
-    result = _llm_text("You produce final, user-ready travel plans.", prompt)
-
+    logger.info("Final agent — pass-through (itinerary is complete)")
+    itinerary = state.get("itinerary", "")
     return {
-        "final_response":  result,
-        "itinerary_json":  state.get("itinerary_json", ""),   # carry structured data forward
-        "messages":        [AIMessage(content=result)],
-        "llm_calls":       state.get("llm_calls", 0) + 1,
+        "final_response": itinerary,
+        "itinerary_json": state.get("itinerary_json", ""),
+        "messages":       [AIMessage(content="Travel plan ready.")],
+        "llm_calls":      state.get("llm_calls", 0),
     }
