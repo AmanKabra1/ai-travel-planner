@@ -768,17 +768,19 @@ def _build_pdf_bytes(state: dict) -> bytes:
         if not text:
             return ""
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r"\*{1,3}(.*?)\*{1,3}", r"\1", text)
+        text = re.sub(r"\*{1,3}(.*?)\*{1,3}", r"\1", text)       # bold/italic
         text = re.sub(r"`{1,3}.*?`{1,3}", "", text, flags=re.DOTALL)
-        text = re.sub(r"#{1,6}\s*", "", text)
+        text = re.sub(r"#{1,6}\s*", "", text)                      # headings
+        text = re.sub(r"^>\s*", "", text, flags=re.MULTILINE)      # blockquotes
+        text = re.sub(r"^\\\s*", "", text, flags=re.MULTILINE)     # leading backslash
         text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
-        text = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", text)
-        text = re.sub(r"^\|.*\|$", "", text, flags=re.MULTILINE)
-        text = re.sub(r"^[-|: ]+$", "", text, flags=re.MULTILINE)
+        text = re.sub(r"\[([^\]]+)\]\(https?://[^\)]+\)", r"\1", text)  # markdown links
+        text = re.sub(r"<https?://[^>]+>", "", text)               # raw <URL> links
+        text = re.sub(r"^\|.*$", "", text, flags=re.MULTILINE)     # ALL table rows
+        text = re.sub(r"^[-|:= ]{3,}$", "", text, flags=re.MULTILINE)  # table borders / hr
         text = re.sub(r"\n{3,}", "\n\n", text)
         text = text.translate(_LATIN1)
-        # Strip ALL remaining non-Latin-1 characters (emojis, Devanagari, etc.)
-        text = re.sub(r"[^\x00-\xFF]", "", text)
+        text = re.sub(r"[^\x00-\xFF]", "", text)                   # strip emojis etc.
         return text.encode("latin-1", errors="replace").decode("latin-1").strip()
 
     # ── Palette ───────────────────────────────────────────────────────────────
@@ -942,14 +944,16 @@ def _build_pdf_bytes(state: dict) -> bytes:
     def _is_day_header(line: str) -> bool:
         return bool(re.match(r"^\s*(Day\s*\d+|DAY\s*\d+)", line.strip()))
 
+    def _is_numbered_heading(line: str) -> bool:
+        """Detect LLM numbered section titles like '1 Getting There' or '2. Hotels'."""
+        s = line.strip()
+        return bool(re.match(r"^\d{1,2}[\.\):]?\s+[A-Z]", s)) and len(s) < 80
+
     def _draw_day_header(pdf, line: str, color):
-        """Draw a tinted day header pill."""
         r, g, b = color
-        # Light tint (mix toward white)
-        pdf.set_fill_color(min(255, r+180), min(255, g+180), min(255, b+180))
+        pdf.set_fill_color(min(255, r + 190), min(255, g + 190), min(255, b + 190))
         y = pdf.get_y()
         pdf.rect(16, y, 178, 8, "F")
-        # Colored left mark
         pdf.set_fill_color(r, g, b)
         pdf.rect(16, y, 3, 8, "F")
         pdf.set_font("Helvetica", "B", 10)
@@ -961,6 +965,7 @@ def _build_pdf_bytes(state: dict) -> bytes:
         pdf.set_text_color(30, 41, 59)
         pdf.ln(1)
 
+    first_section = True
     for title, content in sections:
         if not content or not content.strip():
             continue
@@ -970,7 +975,12 @@ def _build_pdf_bytes(state: dict) -> bytes:
         if not cleaned.strip():
             continue
 
-        pdf.add_page()
+        # Smart page break: always new page for first section; after that only if < 45mm left
+        if first_section or pdf.get_y() > 252:
+            pdf.add_page()
+        else:
+            pdf.ln(6)
+        first_section = False
         _draw_section_header(pdf, title, color)
 
         pdf.set_font("Helvetica", "", 9.5)
@@ -978,59 +988,82 @@ def _build_pdf_bytes(state: dict) -> bytes:
 
         paragraphs = cleaned.split("\n")
         for para in paragraphs:
-            raw = para.rstrip()
-            stripped = raw.strip()
+            stripped = para.strip()
 
             if not stripped:
-                pdf.ln(2.5)
+                pdf.ln(1.5)
                 continue
 
-            # Day headers (Day 1 / Day 2 etc.)
+            # Day headers  (Day 1, Day 2, ...)
             if _is_day_header(stripped):
-                if pdf.get_y() > 255:
-                    pdf.add_page()
-                    _draw_section_header(pdf, title, color)
-                else:
-                    pdf.ln(2)
+                pdf.ln(2)
                 _draw_day_header(pdf, stripped, color)
                 pdf.set_font("Helvetica", "", 9.5)
                 pdf.set_text_color(30, 41, 59)
                 continue
 
-            # Bullet points — indent
+            # Numbered section headings  (1 Getting There, 2. Hotels, ...)
+            if _is_numbered_heading(stripped):
+                pdf.ln(3)
+                r, g, b = color
+                pdf.set_fill_color(min(255, r + 210), min(255, g + 210), min(255, b + 210))
+                y = pdf.get_y()
+                pdf.rect(16, y, 178, 7, "F")
+                pdf.set_fill_color(r, g, b)
+                pdf.rect(16, y, 2, 7, "F")
+                pdf.set_font("Helvetica", "B", 9.5)
+                pdf.set_text_color(r, g, b)
+                pdf.set_xy(20, y + 0.5)
+                pdf.cell(174, 6, stripped[:90], new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.set_font("Helvetica", "", 9.5)
+                pdf.set_text_color(30, 41, 59)
+                pdf.ln(1)
+                continue
+
+            # Bullet points — indented
             if stripped.startswith(("-", "*", "+")):
                 bullet_text = stripped.lstrip("-*+ ").strip()
                 try:
-                    pdf.set_x(22)
+                    pdf.set_x(20)
                     pdf.set_font("Helvetica", "", 9.5)
-                    pdf.cell(4, 5, "-", new_x=XPos.RIGHT, new_y=YPos.TOP)
-                    pdf.set_x(26)
-                    pdf.multi_cell(eff_w - 12, 5, bullet_text)
+                    pdf.cell(5, 5, "-", new_x=XPos.RIGHT, new_y=YPos.TOP)
+                    pdf.set_x(25)
+                    pdf.multi_cell(eff_w - 11, 5, bullet_text)
                 except Exception:
-                    pdf.ln(3)
+                    pdf.ln(2)
                 continue
 
-            # Sub-heading (ends with colon or all-caps short line)
-            if (stripped.endswith(":") and len(stripped) < 60) or (stripped.isupper() and len(stripped) < 50):
+            # Numbered list items  (1. item, 2. item)
+            if re.match(r"^\d+\.\s+", stripped):
+                try:
+                    pdf.set_x(pdf.l_margin)
+                    pdf.multi_cell(eff_w, 5, stripped)
+                except Exception:
+                    pdf.ln(2)
+                continue
+
+            # Sub-heading: short line ending with colon, or ALL-CAPS
+            if (stripped.endswith(":") and len(stripped) < 65) or \
+               (stripped.isupper() and 4 < len(stripped) < 55):
                 pdf.ln(2)
-                pdf.set_font("Helvetica", "B", 10)
                 r, g, b = color
+                pdf.set_font("Helvetica", "B", 9.5)
                 pdf.set_text_color(r, g, b)
                 try:
                     pdf.set_x(pdf.l_margin)
-                    pdf.multi_cell(eff_w, 5.5, stripped)
+                    pdf.multi_cell(eff_w, 5, stripped)
                 except Exception:
-                    pdf.ln(3)
+                    pdf.ln(2)
                 pdf.set_font("Helvetica", "", 9.5)
                 pdf.set_text_color(30, 41, 59)
                 continue
 
-            # Normal paragraph
+            # Normal body text
             try:
                 pdf.set_x(pdf.l_margin)
                 pdf.multi_cell(eff_w, 5, stripped)
             except Exception:
-                pdf.ln(3)
+                pdf.ln(2)
 
     return bytes(pdf.output())
 
