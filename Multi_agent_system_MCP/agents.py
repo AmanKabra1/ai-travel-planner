@@ -843,6 +843,18 @@ Remember: output JSON block first, then ---PROSE--- separator, then markdown sum
     else:
         prose = result
 
+    # Strip any leaked instruction text before the first real content line
+    # (LLM sometimes echoes back instruction phrases before the actual ## Day 1 heading)
+    prose_lines = prose.split("\n")
+    first_real = 0
+    for idx, ln in enumerate(prose_lines):
+        s = ln.strip()
+        if s.startswith("##") or s.startswith("|") or s.startswith("**"):
+            first_real = idx
+            break
+    if first_real > 0:
+        prose = "\n".join(prose_lines[first_real:]).strip()
+
     approval_request = (
         f"Please review this draft travel plan.\n\n{prose}\n\nApprove or request changes."
     )

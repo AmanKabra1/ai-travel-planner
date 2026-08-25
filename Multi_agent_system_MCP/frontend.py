@@ -547,6 +547,8 @@ def _clean_tab(text: str, max_chars: int = 10000) -> str:
     """Remove runaway repetition and cap length for tab display."""
     if not text:
         return text
+    import re as _re_ct
+    text = _re_ct.sub(r'<think>.*?</think>', '', text, flags=_re_ct.DOTALL | _re_ct.IGNORECASE)
     # Detect repetition: same 120-char window appearing 3+ times → cut before 3rd
     window = 120
     t = text
@@ -1029,19 +1031,18 @@ def _build_pdf_bytes(state: dict) -> bytes:
     ]
 
     def _draw_section_header(pdf, title, color):
-        """Draw a full-width colored section header banner."""
+        """Draw a compact full-width colored section header banner."""
         y = pdf.get_y()
         r, g, b = color
         pdf.set_fill_color(r, g, b)
-        pdf.rect(0, y, 210, 11, "F")
-        # White text
-        pdf.set_font("Helvetica", "B", 12)
+        pdf.rect(0, y, 210, 8, "F")
+        pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(255, 255, 255)
-        pdf.set_xy(16, y + 1.5)
-        pdf.cell(178, 8, title.upper(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_xy(16, y + 1)
+        pdf.cell(178, 6, title.upper(), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_x(pdf.l_margin)
         pdf.set_text_color(30, 41, 59)
-        pdf.ln(3)
+        pdf.ln(2)
 
     def _split_blocks(text: str) -> list:
         """Split markdown into alternating ('text', ...) and ('table', ...) blocks."""
@@ -1146,7 +1147,9 @@ def _build_pdf_bytes(state: dict) -> bytes:
             pdf.ln(2)
 
     def _render_section(pdf, content: str):
-        """Render section content: tables via table(), non-table text via write_html."""
+        """Render section: only tables (max 2 tables, 4 rows each) — skip prose."""
+        _MAX_TABLES = 2
+        _MAX_ROWS   = 4
         text = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
         text = re.sub(r"\[([^\]]+)\]\(https?://[^\)]+\)", r"\1", text)
@@ -1154,43 +1157,18 @@ def _build_pdf_bytes(state: dict) -> bytes:
         text = text.strip()
         if not text:
             return
+        table_count = 0
         for block_type, block_text in _split_blocks(text):
             if not block_text.strip():
                 continue
             if block_type == "table":
+                if table_count >= _MAX_TABLES:
+                    continue
                 headers, rows = _parse_md_table(block_text)
                 if headers:
-                    _render_table(pdf, headers, rows)
-            else:
-                # Non-table text: headings, paragraphs, lists
-                if _has_md:
-                    html = _md_lib.markdown(block_text, extensions=["sane_lists"])
-                else:
-                    html = "<p>" + re.sub(r"\n\n+", "</p><p>", block_text.strip()) + "</p>"
-                html = re.sub(r'<a\s[^>]*>(.*?)</a>', r'\1', html, flags=re.DOTALL)
-                html = html.translate(_LATIN1)
-                html = re.sub(r"[^\x00-\xFF]", " ", html)
-                if html.strip():
-                    try:
-                        pdf.set_font("Helvetica", "", 9)
-                        pdf.set_text_color(30, 41, 59)
-                        pdf.set_x(pdf.l_margin)
-                        pdf.write_html(html)
-                        pdf.ln(2)
-                    except Exception:
-                        cleaned = _clean(block_text)
-                        pdf.set_font("Helvetica", "", 9.5)
-                        pdf.set_text_color(30, 41, 59)
-                        for _p in cleaned.split("\n"):
-                            _s = _p.strip()
-                            if _s:
-                                try:
-                                    pdf.set_x(pdf.l_margin)
-                                    pdf.multi_cell(eff_w, 5, _s)
-                                except Exception:
-                                    pdf.ln(2)
-                            else:
-                                pdf.ln(1.5)
+                    _render_table(pdf, headers, rows[:_MAX_ROWS])
+                    table_count += 1
+            # prose blocks skipped — section header already names the section
 
     # ── Day-table renderer from itinerary_json ────────────────────────────────
     def _draw_day_table(pdf, day_data: dict, color):
@@ -1299,84 +1277,34 @@ def _build_pdf_bytes(state: dict) -> bytes:
 
         color = SECTION_COLORS.get(title, (14, 165, 233))
 
-        # Smart page break: always new page for first section; after that only if < 45mm left
-        if first_section or pdf.get_y() > 252:
+        # First section always starts on a new page (after cover);
+        # subsequent sections only break when < 55mm remains.
+        if first_section or pdf.get_y() > 242:
             pdf.add_page()
         else:
-            pdf.ln(6)
+            pdf.ln(3)
         first_section = False
         _draw_section_header(pdf, title, color)
 
         # For the itinerary section: render structured day tables from JSON first
         if title == "Complete Itinerary" and _itin_data.get("days"):
-            # AI badge
-            pdf.ln(2)
-            pdf.set_font("Helvetica", "B", 8)
+            # Compact AI badge + total estimate on one line
+            pdf.set_font("Helvetica", "I", 7.5)
             pdf.set_text_color(202, 138, 4)
             pdf.set_x(pdf.l_margin)
-            pdf.cell(0, 5, "* AI-Generated Itinerary — verify bookings & prices before travel *",
-                     new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            ts = _itin_data.get("trip_summary", {})
+            badge = "AI-Generated — verify bookings before travel"
+            if ts.get("total_budget_estimate"):
+                badge += f"   |   Total: {_clean(str(ts['total_budget_estimate']))}"
+            pdf.cell(0, 5, badge, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.ln(1)
 
-            ts = _itin_data.get("trip_summary", {})
-            if ts.get("total_budget_estimate"):
-                pdf.set_font("Helvetica", "B", 10)
-                pdf.set_text_color(14, 165, 233)
-                pdf.set_x(pdf.l_margin)
-                pdf.cell(0, 6, f"Total Estimate: {_clean(str(ts['total_budget_estimate']))}",
-                         new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-                pdf.ln(2)
-
             for day in _itin_data["days"]:
-                if pdf.get_y() > 240:
+                if pdf.get_y() > 248:
                     pdf.add_page()
                 _draw_day_table(pdf, day, color)
 
-            # Budget summary table
-            bd = _itin_data.get("budget_breakdown", {})
-            if bd:
-                if pdf.get_y() > 230:
-                    pdf.add_page()
-                pdf.ln(3)
-                y = pdf.get_y()
-                r2, g2, b2 = (234, 88, 12)
-                pdf.set_fill_color(r2, g2, b2)
-                pdf.rect(16, y, 178, 8, "F")
-                pdf.set_font("Helvetica", "B", 9)
-                pdf.set_text_color(255, 255, 255)
-                pdf.set_xy(19, y + 1)
-                pdf.cell(172, 6, "BUDGET BREAKDOWN", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-                _bd_rows = [
-                    ("Transport (to destination)", bd.get("transport_total", "—")),
-                    ("Hotels", bd.get("hotel_total", "—")),
-                    ("Food & dining", bd.get("food_total", "—")),
-                    ("Activities", bd.get("activities_total", "—")),
-                    ("Local transport", bd.get("local_transport_total", "—")),
-                    ("Buffer (10%)", bd.get("buffer_10pct", "—")),
-                ]
-                for idx2, (lbl2, val2) in enumerate(_bd_rows):
-                    bg2 = (245, 250, 255) if idx2 % 2 == 0 else (255, 255, 255)
-                    pdf.set_fill_color(*bg2)
-                    pdf.set_font("Helvetica", "", 8.5)
-                    pdf.set_text_color(30, 41, 59)
-                    pdf.set_x(16)
-                    pdf.cell(120, 5.5, _clean(lbl2), border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
-                    pdf.cell(58, 5.5, _clean(str(val2))[:20], border=1, fill=True,
-                             new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-                # Grand total
-                gt = _clean(str(bd.get("grand_total", "")))
-                pp = _clean(str(bd.get("cost_per_person", "")))
-                if gt:
-                    pdf.set_fill_color(14, 165, 233)
-                    pdf.set_font("Helvetica", "B", 9)
-                    pdf.set_text_color(255, 255, 255)
-                    pdf.set_x(16)
-                    lbl_gt = f"GRAND TOTAL  ({_clean(str(members))} pax)"
-                    pdf.cell(120, 6.5, lbl_gt, border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
-                    pdf.cell(58, 6.5, f"{gt}  ({pp}/person)", border=1, fill=True,
-                             new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-                pdf.ln(4)
-            # Skip prose rendering for itinerary section when we have JSON
+            # Skip prose fallback — budget detail is in Budget section
             continue
 
         # ── Render section: tables via table(), text via write_html ─────────
@@ -1841,6 +1769,42 @@ if _show_form:
             "</div>",
             unsafe_allow_html=True,
         )
+
+
+# ── Building banner — shown while research agents are running ──────────────────
+if _is_running:
+    st.markdown("""
+<style>
+@keyframes _wdr_pulse{0%,100%{opacity:1}50%{opacity:0.55}}
+@keyframes _wdr_spin{to{transform:rotate(360deg)}}
+._wdr_spinner{
+    display:inline-block;width:28px;height:28px;
+    border:3px solid rgba(14,165,233,0.25);
+    border-top-color:#0ea5e9;border-radius:50%;
+    animation:_wdr_spin 0.9s linear infinite;
+    vertical-align:middle;margin-right:10px;
+}
+._wdr_dots span{animation:_wdr_pulse 1.4s ease-in-out infinite}
+._wdr_dots span:nth-child(2){animation-delay:.2s}
+._wdr_dots span:nth-child(3){animation-delay:.4s}
+</style>
+<div style="
+    background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);
+    border-radius:16px;padding:2rem 2.5rem;text-align:center;
+    margin:1.5rem 0;border:1px solid rgba(14,165,233,0.35);
+">
+  <div style="font-size:2.4rem;margin-bottom:0.6rem;">🗺️</div>
+  <div style="color:#fff;font-size:1.35rem;font-weight:700;margin-bottom:0.5rem;">
+    <span class="_wdr_spinner"></span>Building Your Travel Plan
+    <span class="_wdr_dots"><span>.</span><span>.</span><span>.</span></span>
+  </div>
+  <div style="color:#94a3b8;font-size:0.92rem;margin-bottom:0.9rem;">
+      AI agents are researching flights, hotels, weather &amp; attractions for you
+  </div>
+  <div style="color:#0ea5e9;font-size:0.82rem;">
+      ✈️ &nbsp;Research takes 30–60 seconds — progress updates appear below
+  </div>
+</div>""", unsafe_allow_html=True)
 
 
 # ── Stage 1: Button clicked → save inputs, set running, rerun ─────────────────
