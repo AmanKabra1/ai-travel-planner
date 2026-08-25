@@ -189,6 +189,21 @@ textarea:invalid { border-color: #1a3a6b !important; box-shadow: none !important
 [style*="rgb(255, 75, 75)"] { color: #94a3b8 !important; }
 [style*="border-color: rgb(255"] { border-color: #1a3a6b !important; }
 label { color: #94a3b8 !important; }
+
+/* ── Tab active indicator — override Streamlit's default red/pink ── */
+[data-baseweb="tab-highlight"] {
+    background-color: #0ea5e9 !important;
+}
+[data-baseweb="tab"][aria-selected="true"] {
+    color: #0ea5e9 !important;
+}
+[data-baseweb="tab-border"] { background-color: #1a3a6b !important; }
+
+/* ── Kill browser spellcheck red underlines on all inputs ── */
+input, textarea {
+    -webkit-text-decoration: none !important;
+    text-decoration: none !important;
+}
 .stTextArea label { display: none; }
 
 /* ── No text-wrap on all buttons ── */
@@ -410,6 +425,26 @@ summary:hover { color: #94a3b8 !important; }
 .section-icon { font-size: 1.2rem; }
 .section-title { font-size: 1.1rem; font-weight: 700; color: #bfdbfe !important; }
 </style>
+<script>
+(function disableSpellcheck() {
+    function patch(root) {
+        root.querySelectorAll('input, textarea').forEach(function(el) {
+            el.setAttribute('spellcheck', 'false');
+            el.setAttribute('autocomplete', 'off');
+            el.setAttribute('autocorrect', 'off');
+            el.setAttribute('autocapitalize', 'off');
+        });
+    }
+    patch(document);
+    new MutationObserver(function(mutations) {
+        mutations.forEach(function(m) {
+            m.addedNodes.forEach(function(n) {
+                if (n.nodeType === 1) patch(n);
+            });
+        });
+    }).observe(document.body, { childList: true, subtree: true });
+})();
+</script>
 """, unsafe_allow_html=True)
 
 

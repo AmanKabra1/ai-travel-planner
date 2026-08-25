@@ -147,15 +147,16 @@ User request:
 Decide which specialist agents are needed for the user request.
 
 Available agents:
-- flight_agent  : flights, airports, airlines, routes, airfare
-- hotel_agent   : hotels, accommodation, neighbourhood guides
-- weather_agent : weather, climate, seasonal advice, packing
-- budget_agent  : cost breakdown, affordability, money-saving tips
+- flight_agent    : flights, airports, airlines, routes, airfare
+- hotel_agent     : hotels, accommodation, neighbourhood guides
+- weather_agent   : weather, climate, seasonal advice, packing
+- nearby_agent    : nearby attractions, temples, parks, local food, points of interest
+- budget_agent    : cost breakdown, affordability, money-saving tips
 - itinerary_agent : always include — produces the actual travel plan
 
 Return ONLY JSON:
 {{
-  "selected_agents": ["flight_agent", "hotel_agent", "weather_agent", "budget_agent", "itinerary_agent"],
+  "selected_agents": ["flight_agent", "hotel_agent", "weather_agent", "nearby_agent", "budget_agent", "itinerary_agent"],
   "trip_constraints": {{
     "destination": "",
     "origin": "",
@@ -177,7 +178,7 @@ User request:
         logger.warning("Routing JSON parse failed: %s. Defaulting all agents.", exc)
         parsed = {
             "selected_agents":  ["flight_agent", "hotel_agent", "weather_agent",
-                                  "budget_agent", "itinerary_agent"],
+                                  "nearby_agent", "budget_agent", "itinerary_agent"],
             "trip_constraints": {},
             "reasoning":        "Default routing (parse error).",
         }
@@ -341,6 +342,65 @@ Do not output raw JSON.
 
 # ── Weather agent ─────────────────────────────────────────────────────────────
 
+def _fmt_weather(now_raw: str, fore_raw: str) -> str:
+    """Format raw MCP weather JSON into readable markdown."""
+    import json as _j
+
+    lines: list[str] = []
+
+    # ── Current conditions ──────────────────────────────────────────────────
+    try:
+        now = _j.loads(now_raw)
+        city = now.get("city", "")
+        lines.append(f"## 🌤️ Weather in {city}\n")
+        lines.append("### Current Conditions")
+        cond       = now.get("condition", "—")
+        temp       = now.get("temperature_c", "—")
+        feels      = now.get("feels_like_c", "—")
+        humidity   = now.get("humidity_%", "—")
+        wind       = now.get("wind_speed_kmh", "—")
+        visibility = now.get("visibility_km", "—")
+        lines.append(f"| | |")
+        lines.append(f"|---|---|")
+        lines.append(f"| ☁️ Condition     | {cond} |")
+        lines.append(f"| 🌡️ Temperature   | {temp}°C (feels like {feels}°C) |")
+        lines.append(f"| 💧 Humidity      | {humidity}% |")
+        lines.append(f"| 💨 Wind speed    | {wind} km/h |")
+        lines.append(f"| 👁️ Visibility    | {visibility} km |")
+    except Exception:
+        lines.append("### Current Conditions")
+        lines.append(now_raw)
+
+    lines.append("")
+
+    # ── Forecast ────────────────────────────────────────────────────────────
+    try:
+        fore = _j.loads(fore_raw)
+        days = fore.get("forecast", [])
+        if days:
+            lines.append("### 📅 Forecast")
+            lines.append("| Date | Max | Min | Condition | Rain |")
+            lines.append("|------|-----|-----|-----------|------|")
+            for d in days:
+                date  = d.get("date", "")
+                hi    = d.get("max_temp_c", "—")
+                lo    = d.get("min_temp_c", "—")
+                cond  = d.get("condition", "—")
+                rain  = d.get("rain_mm", 0)
+                lines.append(f"| {date} | {hi}°C | {lo}°C | {cond} | {rain} mm |")
+            lines.append("")
+            # Sunrise/sunset from first day
+            sr = days[0].get("sunrise", "")
+            ss = days[0].get("sunset", "")
+            if sr or ss:
+                lines.append(f"🌅 Sunrise: **{sr}**  &nbsp;|&nbsp;  🌇 Sunset: **{ss}**")
+    except Exception:
+        lines.append("### Forecast")
+        lines.append(fore_raw)
+
+    return "\n".join(lines)
+
+
 def weather_agent(state: TravelState):
     city = (state.get("trip_constraints") or {}).get("destination", "")
     logger.info("Weather agent — city: %s", city)
@@ -348,11 +408,10 @@ def weather_agent(state: TravelState):
     try:
         weather_now  = _extract_text(asyncio.run(current_weather(city)))
         weather_fore = _extract_text(asyncio.run(forecast(city)))
+        result = _fmt_weather(weather_now, weather_fore)
     except Exception as exc:
         logger.warning("Weather MCP call failed: %s", exc)
-        weather_now = weather_fore = "Live weather data unavailable."
-
-    result = f"**Current conditions:**\n{weather_now}\n\n**Forecast:**\n{weather_fore}"
+        result = "Live weather data unavailable."
 
     return {
         "weather_results": result,
