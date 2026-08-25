@@ -7,7 +7,7 @@ import re
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.types import interrupt
 
-from config import GROQ_FALLBACKS, get_llm, get_retry_models
+from config import GROQ_FALLBACKS, get_gemini_llm, get_llm, get_retry_models
 from mcp_client import current_weather, forecast, tavily_search
 from nearby_api import (
     bucket_pois,
@@ -34,14 +34,35 @@ def _strip_think(text: str) -> str:
 
 
 def _llm_text(system: str, prompt: str) -> str:
-    """Call the LLM, auto-switching to the next model on any API error.
+    """Call the LLM with Gemini as primary and Groq as fallback.
 
-    Uses the live Groq model list (fetched at startup) so we only try real,
-    current model IDs — not stale ones from the static GROQ_FALLBACKS list.
+    1. Try Google Gemini Flash (no TPM limits, 1M context window).
+    2. If Gemini fails or is not configured, fall through to Groq retry loop.
     Strips <think> blocks produced by reasoning models (e.g. DeepSeek R1).
     """
     global llm
     msgs = [SystemMessage(content=system), HumanMessage(content=prompt)]
+
+    # ── Primary: Google Gemini Flash ──────────────────────────────────────────
+    gemini = get_gemini_llm()
+    if gemini is not None:
+        try:
+            result = gemini.invoke(msgs)
+            raw = result.content if hasattr(result, "content") else str(result)
+            # Gemini may return a list of content blocks
+            if isinstance(raw, list):
+                text = " ".join(
+                    b.get("text", "") if isinstance(b, dict) else str(b)
+                    for b in raw
+                )
+            else:
+                text = str(raw)
+            logger.info("Gemini responded OK (%d chars)", len(text))
+            return _strip_think(text)
+        except Exception as exc:
+            logger.warning("Gemini failed, falling back to Groq: %s", str(exc)[:300])
+
+    # ── Fallback: Groq retry loop ─────────────────────────────────────────────
     retry_list = get_retry_models()   # live IDs from Groq /models API
     tried: set[str] = set()
     for _ in range(len(retry_list) + 1):
@@ -52,16 +73,15 @@ def _llm_text(system: str, prompt: str) -> str:
             tried.add(current)
             exc_str = str(exc)
             logger.error("Groq model %s error: %s", current, exc_str[:300])
-            # Brief pause on rate-limit (429) errors before trying next model
             if "429" in exc_str or "rate_limit" in exc_str.lower():
                 import time as _time; _time.sleep(2)
             next_models = [m for m in retry_list if m not in tried]
             if not next_models:
-                raise RuntimeError(f"All Groq models failed. Last: {current} — {exc_str[:200]}") from exc
+                raise RuntimeError(f"All models failed. Last Groq: {current} — {exc_str[:200]}") from exc
             nxt = next_models[0]
             logger.warning("Groq model %s failed; switching to %s", current, nxt)
             llm = get_llm(nxt)
-    raise RuntimeError("All Groq models exhausted")
+    raise RuntimeError("All LLM providers exhausted")
 
 
 def _extract_text(mcp_result) -> str:

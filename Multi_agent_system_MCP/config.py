@@ -171,6 +171,24 @@ def _find_working_groq_model() -> str:
     return candidates[0] if candidates else GROQ_FALLBACKS[0]
 
 
+def get_gemini_llm(model: str = "gemini-3.6-flash"):
+    """Return a ChatGoogleGenerativeAI instance if GOOGLE_API_KEY is set, else None."""
+    api_key = os.getenv("GOOGLE_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        return ChatGoogleGenerativeAI(
+            model=model,
+            google_api_key=api_key,
+            max_output_tokens=4096,
+            temperature=0.3,
+        )
+    except Exception as exc:
+        _log.warning("Gemini LLM init failed: %s", exc)
+        return None
+
+
 def get_llm(model: str | None = None, max_tokens: int = 4096) -> ChatGroq:
     """Return a verified, working ChatGroq instance.
 
