@@ -1,4 +1,4 @@
-import psycopg
+from psycopg_pool import ConnectionPool
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, START, StateGraph
 
@@ -86,11 +86,17 @@ def build_graph():
     graph.add_edge("final_response",  END)
 
     if DATABASE_URL:
-        # autocommit=True is required for DDL (CREATE TABLE) statements in
-        # checkpointer.setup() — without it psycopg wraps everything in a
-        # transaction and Neon's PgBouncer pooler raises ActiveSqlTransaction.
-        conn = psycopg.connect(DATABASE_URL, autocommit=True)
-        checkpointer = PostgresSaver(conn)
+        # ConnectionPool auto-reconnects when Neon closes idle connections.
+        # autocommit=True + prepare_threshold=0 are required for Neon's
+        # PgBouncer pooler (DDL outside transactions, no prepared statements).
+        pool = ConnectionPool(
+            conninfo=DATABASE_URL,
+            kwargs={"autocommit": True, "prepare_threshold": 0},
+            min_size=1,
+            max_size=5,
+            open=True,
+        )
+        checkpointer = PostgresSaver(pool)
         checkpointer.setup()
         return graph.compile(checkpointer=checkpointer)
 
