@@ -64,6 +64,7 @@ packaging==26.2
 pandas==3.0.3
 aviationstack-mcp
 fpdf2==2.7.9
+markdown==3.7
 pillow==12.2.0
 propcache==0.5.2
 protobuf==7.35.0

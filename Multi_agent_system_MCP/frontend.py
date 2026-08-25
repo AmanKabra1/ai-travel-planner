@@ -834,6 +834,11 @@ def _build_pdf_bytes(state: dict) -> bytes:
     import re, json as _json
     from fpdf import FPDF
     from fpdf.enums import XPos, YPos
+    try:
+        import markdown as _md_lib
+        _has_md = True
+    except ImportError:
+        _has_md = False
 
     tc        = state.get("trip_constraints") or {}
     dest      = tc.get("destination", "Trip")
@@ -1038,29 +1043,40 @@ def _build_pdf_bytes(state: dict) -> bytes:
         pdf.set_text_color(30, 41, 59)
         pdf.ln(3)
 
-    def _is_day_header(line: str) -> bool:
-        return bool(re.match(r"^\s*(Day\s*\d+|DAY\s*\d+)", line.strip()))
-
-    def _is_numbered_heading(line: str) -> bool:
-        """Detect LLM numbered section titles like '1 Getting There' or '2. Hotels'."""
-        s = line.strip()
-        return bool(re.match(r"^\d{1,2}[\.\):]?\s+[A-Z]", s)) and len(s) < 80
-
-    def _draw_day_header(pdf, line: str, color):
-        r, g, b = color
-        pdf.set_fill_color(min(255, r + 190), min(255, g + 190), min(255, b + 190))
-        y = pdf.get_y()
-        pdf.rect(16, y, 178, 8, "F")
-        pdf.set_fill_color(r, g, b)
-        pdf.rect(16, y, 3, 8, "F")
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(r, g, b)
-        pdf.set_xy(22, y + 1)
-        txt = re.sub(r"\s+", " ", line.strip())
-        pdf.cell(172, 6, _clean(txt), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_x(pdf.l_margin)
-        pdf.set_text_color(30, 41, 59)
-        pdf.ln(1)
+    def _md_to_fpdf_html(text: str) -> str:
+        """Convert markdown to fpdf2 write_html-compatible HTML."""
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
+        text = re.sub(r"\[([^\]]+)\]\(https?://[^\)]+\)", r"\1", text)
+        text = re.sub(r"<https?://[^>]+>", "", text)
+        text = text.strip()
+        if not text:
+            return ""
+        if _has_md:
+            html = _md_lib.markdown(text, extensions=["tables", "sane_lists"])
+        else:
+            html = "<p>" + re.sub(r"\n\n+", "</p><p>", text) + "</p>"
+        # fpdf2 doesn't support thead/tbody
+        html = re.sub(r"</?thead>", "", html)
+        html = re.sub(r"</?tbody>", "", html)
+        # Style tables with border
+        html = re.sub(r"<table>", '<table border="1" width="178" bgcolor="#f8fafc">', html)
+        # Header cells: dark navy bg + white bold text
+        html = re.sub(
+            r"<th>(.*?)</th>",
+            r'<th bgcolor="#0f172a"><font color="white" size="8"><b>\1</b></font></th>',
+            html, flags=re.DOTALL)
+        # Data cells: small font
+        html = re.sub(
+            r"<td>(.*?)</td>",
+            r'<td><font size="8">\1</font></td>',
+            html, flags=re.DOTALL)
+        # Strip hyperlinks (keep text)
+        html = re.sub(r'<a\s[^>]*>(.*?)</a>', r'\1', html, flags=re.DOTALL)
+        # Unicode → Latin-1
+        html = html.translate(_LATIN1)
+        html = re.sub(r"[^\x00-\xFF]", " ", html)
+        return html
 
     # ── Day-table renderer from itinerary_json ────────────────────────────────
     def _draw_day_table(pdf, day_data: dict, color):
@@ -1249,91 +1265,34 @@ def _build_pdf_bytes(state: dict) -> bytes:
             # Skip prose rendering for itinerary section when we have JSON
             continue
 
-        cleaned = _clean(content)
-        if not cleaned.strip():
+        # ── Convert markdown → HTML, render with write_html ──────────────────
+        sec_html = _md_to_fpdf_html(content)
+        if not sec_html.strip():
             continue
 
-        pdf.set_font("Helvetica", "", 9.5)
-        pdf.set_text_color(30, 41, 59)
-
-        paragraphs = cleaned.split("\n")
-        for para in paragraphs:
-            stripped = para.strip()
-
-            if not stripped:
-                pdf.ln(1.5)
+        try:
+            pdf.set_font("Helvetica", "", 9)
+            pdf.set_text_color(30, 41, 59)
+            pdf.set_x(pdf.l_margin)
+            pdf.write_html(sec_html)
+            pdf.ln(3)
+        except Exception:
+            # Fallback: strip markdown to plain text
+            cleaned = _clean(content)
+            if not cleaned.strip():
                 continue
-
-            # Day headers  (Day 1, Day 2, ...)
-            if _is_day_header(stripped):
-                pdf.ln(2)
-                _draw_day_header(pdf, stripped, color)
-                pdf.set_font("Helvetica", "", 9.5)
-                pdf.set_text_color(30, 41, 59)
-                continue
-
-            # Numbered section headings  (1 Getting There, 2. Hotels, ...)
-            if _is_numbered_heading(stripped):
-                pdf.ln(3)
-                r, g, b = color
-                pdf.set_fill_color(min(255, r + 210), min(255, g + 210), min(255, b + 210))
-                y = pdf.get_y()
-                pdf.rect(16, y, 178, 7, "F")
-                pdf.set_fill_color(r, g, b)
-                pdf.rect(16, y, 2, 7, "F")
-                pdf.set_font("Helvetica", "B", 9.5)
-                pdf.set_text_color(r, g, b)
-                pdf.set_xy(20, y + 0.5)
-                pdf.cell(174, 6, stripped[:90], new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-                pdf.set_font("Helvetica", "", 9.5)
-                pdf.set_text_color(30, 41, 59)
-                pdf.ln(1)
-                continue
-
-            # Bullet points — indented
-            if stripped.startswith(("-", "*", "+")):
-                bullet_text = stripped.lstrip("-*+ ").strip()
-                try:
-                    pdf.set_x(20)
-                    pdf.set_font("Helvetica", "", 9.5)
-                    pdf.cell(5, 5, "-", new_x=XPos.RIGHT, new_y=YPos.TOP)
-                    pdf.set_x(25)
-                    pdf.multi_cell(eff_w - 11, 5, bullet_text)
-                except Exception:
-                    pdf.ln(2)
-                continue
-
-            # Numbered list items  (1. item, 2. item)
-            if re.match(r"^\d+\.\s+", stripped):
+            pdf.set_font("Helvetica", "", 9.5)
+            pdf.set_text_color(30, 41, 59)
+            for _p in cleaned.split("\n"):
+                _s = _p.strip()
+                if not _s:
+                    pdf.ln(1.5)
+                    continue
                 try:
                     pdf.set_x(pdf.l_margin)
-                    pdf.multi_cell(eff_w, 5, stripped)
+                    pdf.multi_cell(eff_w, 5, _s)
                 except Exception:
                     pdf.ln(2)
-                continue
-
-            # Sub-heading: short line ending with colon, or ALL-CAPS
-            if (stripped.endswith(":") and len(stripped) < 65) or \
-               (stripped.isupper() and 4 < len(stripped) < 55):
-                pdf.ln(2)
-                r, g, b = color
-                pdf.set_font("Helvetica", "B", 9.5)
-                pdf.set_text_color(r, g, b)
-                try:
-                    pdf.set_x(pdf.l_margin)
-                    pdf.multi_cell(eff_w, 5, stripped)
-                except Exception:
-                    pdf.ln(2)
-                pdf.set_font("Helvetica", "", 9.5)
-                pdf.set_text_color(30, 41, 59)
-                continue
-
-            # Normal body text
-            try:
-                pdf.set_x(pdf.l_margin)
-                pdf.multi_cell(eff_w, 5, stripped)
-            except Exception:
-                pdf.ln(2)
 
     return bytes(pdf.output())
 
