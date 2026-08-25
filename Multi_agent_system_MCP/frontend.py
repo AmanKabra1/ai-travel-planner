@@ -566,11 +566,7 @@ _PIPELINE = [
 
 _NODE_LABELS = {
     "supervisor":       "🗺️  Planning your trip…",
-    "transport_agent":  "🚀  Searching flights, trains & buses…",
-    "hotel_agent":      "🏨  Finding the best accommodation…",
-    "weather_agent":    "🌤️  Checking destination weather…",
-    "nearby_agent":     "📍  Discovering nearby attractions…",
-    "budget_agent":     "💰  Calculating costs & budget…",
+    "research_all":     "🔍  Researching flights · hotels · weather · nearby · budget (all at once)…",
     "itinerary_agent":  "📋  Crafting your day-by-day itinerary…",
     "human_approval":   "✍️  Ready for your review…",
     "final_response":   "🎉  Putting the finishing touches…",

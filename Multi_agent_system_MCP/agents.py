@@ -292,21 +292,22 @@ def hotel_agent(state: TravelState):
         search_text = "Live search unavailable."
 
     result = _llm_text(
-        "You are a hotel recommendation specialist. Write each section ONCE only. Stop after listing all hotels.",
-        f"""Based on these web search results, recommend the best hotels and areas to stay.
-
-User request:
-{state['user_query']}
+        "You are a hotel specialist. Output ONLY markdown tables grouped by area. Write each area ONCE.",
+        f"""Hotel recommendations for: {destination}
+User request: {state['user_query']}
 
 Search results (with booking links):
-{search_text[:4500]}
+{search_text[:4000]}
 
-Return a clean, readable markdown summary:
-- Group by area/neighbourhood
-- List 2–4 specific hotels per area with name, price range, vibe
-- For each hotel, include the booking/source link as a Markdown hyperlink like [Hotel Name](URL)
-- Include one direct booking site link per hotel where available (Booking.com, Hotels.com, Agoda, etc.)
-Do not output raw JSON. Write each section ONCE. Stop after all hotels are listed.
+Group hotels by area. For each area output a table:
+
+### [Area / Neighbourhood Name]
+| Hotel | Price/Night (₹) | Type | Rating | Highlights | Book |
+|-------|----------------|------|--------|------------|------|
+(budget / standard / premium rows; hyperlink hotel name to booking URL if available)
+
+Cover at least 3 areas. Include a mix of budget, mid-range, and premium options.
+Do NOT output bullet lists or prose. Tables only.
 """,
     )
 
@@ -337,63 +338,43 @@ def transport_agent(state: TravelState):
     )
 
     result = _llm_text(
-        "You are a comprehensive transport specialist. Write each section ONCE only. End your response after the '## 💡 Best Option by Budget' section. Never repeat headings or bullet points.",
-        f"""Provide a comprehensive transport guide for this route covering ALL modes of transport.
-
+        "You are a transport specialist. Output ONLY markdown tables — no bullet lists, no prose paragraphs. Write each section ONCE.",
+        f"""Transport guide for: {route_str}
 User request: {state['user_query']}
-Route: {route_str}
 
-Flight search results:
-{flights_search}
+FLIGHT DATA: {flights_search[:1200]}
+TRAIN (DIRECT): {train_direct[:1200]}
+TRAIN (VIA): {train_via[:800]}
+BUS DATA: {bus_search[:800]}
+GENERAL: {general[:600]}
 
-Direct train search results:
-{train_direct}
-
-Connecting / via-route train results:
-{train_via}
-
-Bus search results:
-{bus_search}
-
-General transport search:
-{general}
-
-Return a clean markdown guide with these sections:
+Output these sections with markdown tables:
 
 ## ✈️ Flights
-### Direct Flights
-List any direct flights found: airline, fare range, duration, [Book on Google Flights](https://www.google.com/flights)
-### Connecting Flights (if no direct)
-- Via [Hub]: Airline, approx. fare Rs./$ X, total ~X hrs
-If no flight data available, write: "No flight data found — check Google Flights or MakeMyTrip."
+| Airline | Route | Fare (₹) | Duration | Book |
+|---------|-------|----------|----------|------|
+(one row per option; if no direct flight add row "Via [Hub] – [Airline]"; if no data write "No flights — nearest airport: [X] ([Y] km)")
 
 ## 🚂 Trains
-### Direct Trains
-List every direct train found: name/number, departure time, arrival time, duration, fare (sleeper/3AC/2AC), [Book on IRCTC](https://www.irctc.co.in)
-### Connecting Trains (change at junction)
-If there is no direct train, show the best via-route:
-- Leg 1: [Train Name] — Origin → Junction City — depart HH:MM, arrive HH:MM, X hrs, Rs. Y
-- Leg 2: [Train Name] — Junction City → Destination — depart HH:MM, arrive HH:MM, X hrs, Rs. Y
-- Total journey time including connection wait
-- [Book on IRCTC](https://www.irctc.co.in)
+| Train Name | No. | Departs | Arrives | Duration | Fare Sl/3A/2A | Book |
+|-----------|-----|---------|---------|----------|---------------|------|
+(for connecting trains add separate rows labelled "Leg 1" / "Leg 2" with junction city)
+[Book on IRCTC](https://www.irctc.co.in)
 
 ## 🚌 Buses
-List direct buses AND via-route options if no direct:
-- Operator with [Book Now](URL), departure time, duration, fare
-- Show via-route clearly: City A → City B → City C
+| Operator | Departs | Duration | Fare (₹) | Type | Book |
+|---------|---------|----------|----------|------|------|
 
 ## 🚗 Self-Drive / Cab
-- Road distance (km) and drive time
-- Highway route (e.g. NH-X via City Y)
-- Estimated fuel + toll cost
-- Ola/Uber inter-city if available
+| Route (Highway) | Distance | Drive Time | Est. Fuel+Toll |
+|----------------|---------|-----------|----------------|
 
-## 💡 Best Option by Budget
-- Budget: [recommendation]
-- Mid-range: [recommendation]
-- Premium: [recommendation]
+## 💡 Best Option
+| Budget | Mid-Range | Premium |
+|--------|-----------|---------|
+| [pick] | [pick] | [pick] |
 
-Use real train names and numbers. For Indian routes always link IRCTC. Do not output raw JSON.
+Use REAL train names and numbers from data. For Indian routes always link IRCTC.
 """,
     )
 
@@ -563,58 +544,55 @@ def nearby_agent(state: TravelState):
         }
 
     result = _llm_text(
-        "You are a local expert and food/culture guide. Be very specific — use real dish names, real restaurant/stall names, real market names, real prices. No generic descriptions.",
-        f"""Deep local guide for {destination}, {region}, {country}.
+        "You are a local expert. Use REAL names from the data. Output markdown tables for every section. No bullet lists or prose paragraphs.",
+        f"""Local guide for {destination}, {region}, {country}.
 
-OSM MAP DATA (real POIs within 100 km):
-{bucket_txt}
+MAP DATA (POIs): {bucket_txt[:600]}
+ATTRACTIONS: {t_attr[:800]}
+LOCAL FOOD: {t_food[:900]}
+MARKETS: {t_markets[:700]}
+EXPERIENCES: {t_exp[:600]}
+HIDDEN GEMS: {t_gems[:500]}
+LOCAL TRANSPORT: {t_tips[:500]}
 
-WEB RESEARCH (2026):
-ATTRACTIONS: {t_attr[:1200]}
----
-LOCAL FOOD: {t_food[:1400]}
----
-MARKETS & SHOPPING: {t_markets[:1000]}
----
-EXPERIENCES & FESTIVALS: {t_exp[:900]}
----
-HIDDEN GEMS: {t_gems[:800]}
----
-LOCAL TRANSPORT: {t_tips[:700]}
+Output these sections — use tables throughout:
 
-Write detailed Markdown with these sections:
-
-## Nearby Attractions
+## 📍 Nearby Attractions
 ### Within 10 km
-- **Name** (type) — why visit, entry fee, best time to visit
-### 10-30 km — Day Trips
-### 30-100 km — Excursions
-(4-6 real named places per section; include distance and time from {destination})
+| Place | Type | Distance | Entry Fee | Best Time |
+|-------|------|---------|-----------|-----------|
+### 10–30 km — Day Trips
+| Place | Type | Distance | Entry Fee | Best Time |
+|-------|------|---------|-----------|-----------|
+### 30–100 km — Excursions
+| Place | Type | Distance | Entry Fee | Best Time |
+|-------|------|---------|-----------|-----------|
 
-## Local Food Guide
+## 🍜 Local Food Guide
 ### Must-Eat Dishes
-- **Dish name** — brief description — where to find it (specific stall/restaurant name) — price range Rs. X-Y
-(List 8-10 specific dishes with actual local spots; include breakfast, lunch, snacks, dinner options)
+| Dish | Description | Where to Find | Price (₹) |
+|------|------------|--------------|-----------|
 ### Best Restaurants & Dhabas
-- **Name** — specialty — price per person — area/address
+| Name | Specialty | Price/Person (₹) | Area |
+|------|-----------|-----------------|------|
 
-## Famous Markets & Bazaars
-- **Market name** — what it sells (handicrafts / spices / clothing / street food / etc.) — best time to visit — bargaining tips
-(List 4-6 real named markets; include what is unique and famous to buy there)
+## 🛍️ Famous Markets & Bazaars
+| Market | Sells | Best Time | Bargaining Tip |
+|--------|-------|-----------|---------------|
 
-## Local Experiences & Culture
-- Temples, ghats, aarti timings, festivals in 2026
-- Unique activities (boat rides, cooking classes, workshops)
-- Dress code and customs to respect
+## 🎭 Local Experiences
+| Activity | Where | Timing | Cost (₹) |
+|---------|-------|--------|---------|
 
-## Hidden Gems & Offbeat Spots
-- 3-4 underrated places most tourists miss — why they are special
+## 🔍 Hidden Gems
+| Place | Why Special | Distance | Tip |
+|-------|------------|---------|-----|
 
-## Getting Around Locally
-- Auto-rickshaw: typical rates (Rs. per km or fixed routes)
-- Local bus routes and frequency
-- Cab/Ola/Uber availability and estimated fares
-- Walking zones and cycle-rickshaw areas
+## 🚌 Getting Around Locally
+| Mode | Typical Fare | Notes |
+|------|-------------|-------|
+
+Use REAL place names from MAP DATA and WEB RESEARCH.
 """,
     )
 
@@ -661,14 +639,8 @@ Trip details:
 Live 2026 price data for {destination}:
 {price_data}
 
-Transport info — flights, trains, buses (use fares from here):
-{state.get('transport_results', 'N/A')[:1200]}
-
-Hotel info (use prices from here):
-{state.get('hotel_results', 'N/A')[:800]}
-
-Nearby attractions (use entry fees from here):
-{state.get('nearby_results', 'N/A')[:600]}
+Live 2026 price data (use these fares and hotel rates for all cost estimates):
+{price_data}
 
 Produce a budget breakdown in this exact Markdown format:
 
@@ -709,6 +681,47 @@ Use real fares from the search data where possible. Label estimates clearly.
         "messages":       [AIMessage(content="Budget agent completed.")],
         "llm_calls":      state.get("llm_calls", 0) + 1,
     }
+
+
+# ── Parallel research runner ──────────────────────────────────────────────────
+
+def research_all_agent(state: TravelState):
+    """Run all 5 research agents simultaneously in parallel threads.
+
+    This replaces the sequential supervisor-routed chain and reduces total
+    research time from ~5× slowest-agent to ~1× slowest-agent.
+    """
+    selected = state.get("selected_agents") or []
+
+    _agent_map = {
+        "transport_agent": transport_agent,
+        "hotel_agent":     hotel_agent,
+        "weather_agent":   weather_agent,
+        "nearby_agent":    nearby_agent,
+        "budget_agent":    budget_agent,
+    }
+    order = ["transport_agent", "hotel_agent", "weather_agent", "nearby_agent", "budget_agent"]
+    to_run = [_agent_map[n] for n in order if n in selected]
+    if not to_run:
+        return {"messages": [AIMessage(content="No research agents selected.")]}
+
+    merged: dict = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(to_run)) as ex:
+        futures = {ex.submit(fn, state): fn.__name__ for fn in to_run}
+        for fut in concurrent.futures.as_completed(futures):
+            name = futures[fut]
+            try:
+                res = fut.result()
+                for k, v in res.items():
+                    if k != "messages" and v:
+                        merged[k] = v
+                logger.info("✅ %s done", name)
+            except Exception as exc:
+                logger.error("❌ %s failed: %s", name, exc)
+
+    merged["messages"] = [AIMessage(content="All research agents completed in parallel.")]
+    merged["llm_calls"] = state.get("llm_calls", 0) + len(to_run)
+    return merged
 
 
 # ── Master itinerary system prompt (kept short to fit Groq free-tier 8k TPM) ──
