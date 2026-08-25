@@ -34,23 +34,26 @@ if not st.session_state.get("authenticated"):
             st.session_state["session_token"]   = _tok
 
 # ── User timezone (set by JS on first load via ?tz= query param) ──────────────
-_raw_tz = st.query_params.get("tz", "UTC")
+_raw_tz = st.query_params.get("tz", "Asia/Kolkata")   # default IST for Indian users
 try:
     _USER_TZ = ZoneInfo(_raw_tz)
 except Exception:
-    _USER_TZ = ZoneInfo("UTC")
+    _USER_TZ = ZoneInfo("Asia/Kolkata")
 
 
 def _fmt_ts(ts_iso: str) -> str:
-    """Convert a UTC ISO timestamp to the user's local time."""
+    """Convert a UTC ISO timestamp to IST (or user's local time)."""
     if not ts_iso:
         return "—"
     try:
-        dt = datetime.fromisoformat(ts_iso)
+        # LangGraph stores timestamps like "2026-08-25T12:09:00.123456+00:00"
+        # Python <3.11 fromisoformat can't parse "+00:00" on some builds; replace it
+        ts_clean = ts_iso.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(ts_clean)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         local = dt.astimezone(_USER_TZ)
-        return local.strftime("%d %b %Y, %I:%M %p").lstrip("0")
+        return local.strftime("%d %b %Y, %H:%M IST")
     except Exception:
         return ts_iso[:16].replace("T", " ")
 
