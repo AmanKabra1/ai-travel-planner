@@ -1154,9 +1154,9 @@ def _build_pdf_bytes(state: dict) -> bytes:
             pdf.ln(2)
 
     def _render_section(pdf, content: str):
-        """Render section: only tables (max 2 tables, 4 rows each) — skip prose."""
-        _MAX_TABLES = 2
-        _MAX_ROWS   = 4
+        """Render section: tables AND prose (headings, bullets, descriptions)."""
+        _MAX_TABLES = 6
+        _MAX_ROWS   = 20
         text = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r"<think>.*",          "", text,    flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
@@ -1176,7 +1176,40 @@ def _build_pdf_bytes(state: dict) -> bytes:
                 if headers:
                     _render_table(pdf, headers, rows[:_MAX_ROWS])
                     table_count += 1
-            # prose blocks skipped — section header already names the section
+            else:
+                # Render prose: headings bold, bullets as lines
+                for ln in block_text.split("\n"):
+                    s = ln.strip()
+                    if not s:
+                        pdf.ln(1)
+                        continue
+                    if s.startswith("#"):
+                        s = re.sub(r"^#{1,6}\s*", "", s)
+                        s = _clean(s)
+                        if not s:
+                            continue
+                        pdf.set_font("Helvetica", "B", 9)
+                        pdf.set_text_color(15, 23, 42)
+                        pdf.set_x(pdf.l_margin)
+                        pdf.multi_cell(eff_w, 5.5, s)
+                        pdf.ln(0.5)
+                    elif s.startswith(("- ", "* ", "• ")):
+                        s = _clean(s.lstrip("-*• ").strip())
+                        if not s:
+                            continue
+                        pdf.set_font("Helvetica", "", 8.5)
+                        pdf.set_text_color(30, 41, 59)
+                        pdf.set_x(pdf.l_margin + 3)
+                        pdf.multi_cell(eff_w - 3, 5, f"- {s}")
+                    else:
+                        s = _clean(s)
+                        if not s:
+                            continue
+                        pdf.set_font("Helvetica", "", 8.5)
+                        pdf.set_text_color(71, 85, 105)
+                        pdf.set_x(pdf.l_margin)
+                        pdf.multi_cell(eff_w, 5, s)
+                pdf.ln(1)
 
     # ── Day-table renderer from itinerary_json ────────────────────────────────
     def _draw_day_table(pdf, day_data: dict, color):
@@ -1972,27 +2005,159 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "hotel_results
     m3.metric("Duration",      duration)
     m4.metric("Status",        status_label)
 
+    # ── Structured itinerary HTML renderer (from itinerary_json) ────────────────
+    def _render_itin_html(itin_data: dict) -> str:
+        _COLORS = ["#0ea5e9","#10b981","#f59e0b","#8b5cf6",
+                   "#ef4444","#06b6d4","#ec4899","#84cc16"]
+        parts = []
+        ts = itin_data.get("trip_summary") or {}
+        if ts:
+            _m = []
+            if ts.get("total_days"):
+                _m.append(f"<b>{ts['total_days']} Days</b>")
+            if ts.get("total_budget_estimate"):
+                _m.append(f"Estimated: <b>{ts['total_budget_estimate']}</b>")
+            if ts.get("travel_style"):
+                _m.append(str(ts["travel_style"]))
+            parts.append(f"""
+<div style="background:linear-gradient(135deg,#0f172a,#1e3a5f);border-radius:12px;
+padding:1.1rem 1.5rem;margin-bottom:1.4rem;border-left:4px solid #f59e0b;">
+  <div style="color:#f59e0b;font-size:0.7rem;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:.25rem;">Trip Summary</div>
+  <div style="color:#fff;font-size:1rem;font-weight:700;margin-bottom:.3rem;">{ts.get('destination','')}</div>
+  <div style="color:#94a3b8;font-size:.83rem;">{" &nbsp;·&nbsp; ".join(_m)}</div>
+</div>""")
+
+        for idx, day in enumerate(itin_data.get("days") or []):
+            col = _COLORS[idx % len(_COLORS)]
+            dn = day.get("day", idx + 1)
+            hdr = f"Day {dn}"
+            if day.get("theme"):
+                hdr += f" — {day['theme']}"
+            if day.get("date"):
+                hdr += f" &nbsp;|&nbsp; {day['date']}"
+            dc = day.get("estimated_day_cost", "")
+
+            rows_html = ""
+            for ri, act in enumerate(day.get("activities") or []):
+                bg  = "#ffffff" if ri % 2 == 0 else "#f8fafc"
+                t   = act.get("time", "") or "—"
+                pl  = act.get("place", "") or "—"
+                dur = str(act.get("duration_hrs", "") or "—")
+                if dur not in ("—","") and "h" not in dur and "min" not in dur:
+                    dur += "h"
+                fee  = act.get("entry_fee", "") or "—"
+                note = act.get("notes", "") or ""
+                rows_html += f"""
+<tr style="background:{bg};">
+  <td style="padding:.4rem .7rem;font-weight:600;color:{col};font-size:.82rem;
+  white-space:nowrap;border-bottom:1px solid #f1f5f9;">{t}</td>
+  <td style="padding:.4rem .7rem;color:#1e293b;font-size:.85rem;
+  border-bottom:1px solid #f1f5f9;">{pl}</td>
+  <td style="padding:.4rem .7rem;color:#64748b;font-size:.82rem;text-align:center;
+  white-space:nowrap;border-bottom:1px solid #f1f5f9;">{dur}</td>
+  <td style="padding:.4rem .7rem;color:#1e293b;font-size:.82rem;text-align:right;
+  white-space:nowrap;border-bottom:1px solid #f1f5f9;">{fee}</td>
+  <td style="padding:.4rem .7rem;color:#64748b;font-size:.8rem;
+  border-bottom:1px solid #f1f5f9;">{note}</td>
+</tr>"""
+
+            tbl_html = ""
+            if rows_html:
+                tbl_html = f"""
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;font-size:.85rem;">
+<thead><tr style="background:#f1f5f9;">
+  <th style="padding:.45rem .7rem;text-align:left;color:#374151;font-weight:700;
+  font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;
+  border-bottom:2px solid #e2e8f0;white-space:nowrap;width:72px;">Time</th>
+  <th style="padding:.45rem .7rem;text-align:left;color:#374151;font-weight:700;
+  font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;
+  border-bottom:2px solid #e2e8f0;">Activity / Place</th>
+  <th style="padding:.45rem .7rem;text-align:center;color:#374151;font-weight:700;
+  font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;
+  border-bottom:2px solid #e2e8f0;white-space:nowrap;">Duration</th>
+  <th style="padding:.45rem .7rem;text-align:right;color:#374151;font-weight:700;
+  font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;
+  border-bottom:2px solid #e2e8f0;white-space:nowrap;">Cost</th>
+  <th style="padding:.45rem .7rem;text-align:left;color:#374151;font-weight:700;
+  font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;
+  border-bottom:2px solid #e2e8f0;">Notes</th>
+</tr></thead>
+<tbody>{rows_html}</tbody>
+</table></div>"""
+
+            meals = day.get("meals") or {}
+            meal_bits = []
+            if meals.get("breakfast"): meal_bits.append(f"🍳 <b>BF:</b> {meals['breakfast']}")
+            if meals.get("lunch"):     meal_bits.append(f"🍽 <b>Lunch:</b> {meals['lunch']}")
+            if meals.get("dinner"):    meal_bits.append(f"🌙 <b>Dinner:</b> {meals['dinner']}")
+            meals_html = ""
+            if meal_bits:
+                meals_html = f"""
+<div style="background:#f8fafc;padding:.45rem .75rem;border-top:1px solid #e2e8f0;
+font-size:.82rem;color:#475569;">{" &nbsp;·&nbsp; ".join(meal_bits)}</div>"""
+
+            cost_html = ""
+            if dc:
+                cost_html = f"""
+<div style="background:{col}18;padding:.35rem .75rem;border-top:1px solid {col}33;
+font-size:.82rem;font-weight:700;color:{col};text-align:right;">
+  Day Budget: {dc} / person</div>"""
+
+            parts.append(f"""
+<div style="margin-bottom:1.1rem;border-radius:10px;overflow:hidden;
+border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,.06);">
+  <div style="background:{col};padding:.6rem 1rem;display:flex;
+  justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem;">
+    <span style="color:#fff;font-weight:700;font-size:.95rem;">{hdr}</span>
+    {"<span style='color:rgba(255,255,255,.85);font-size:.82rem;font-weight:600;'>" + str(dc) + " / person</span>" if dc else ""}
+  </div>
+  {tbl_html}{meals_html}{cost_html}
+</div>""")
+
+        return "\n".join(parts)
+
     _gen_final = st.session_state.get("generating_final", False)
 
-    # ── Itinerary-generation banner (shown while final plan is being written) ──
+    # ── Final itinerary generation — run ABOVE tabs so spinner is visible ──────
     if _gen_final:
         st.markdown("""
 <style>
 @keyframes _wdr_spin2{to{transform:rotate(360deg)}}
-._wdr_spin2{display:inline-block;width:24px;height:24px;border:3px solid rgba(16,185,129,0.25);
-border-top-color:#10b981;border-radius:50%;animation:_wdr_spin2 0.9s linear infinite;
-vertical-align:middle;margin-right:8px;}
+._wdr_spin2{display:inline-block;width:28px;height:28px;
+border:3px solid rgba(16,185,129,0.25);border-top-color:#10b981;
+border-radius:50%;animation:_wdr_spin2 0.9s linear infinite;
+vertical-align:middle;margin-right:10px;}
 </style>
-<div style="background:linear-gradient(135deg,#052e16 0%,#14532d 100%);border-radius:14px;
-padding:1.6rem 2rem;text-align:center;margin:1rem 0;border:1px solid rgba(16,185,129,0.35);">
-  <div style="font-size:2rem;margin-bottom:0.4rem;">📋</div>
-  <div style="color:#fff;font-size:1.2rem;font-weight:700;margin-bottom:0.4rem;">
+<div style="background:linear-gradient(135deg,#052e16 0%,#14532d 100%);
+border-radius:16px;padding:2rem 2.5rem;text-align:center;
+margin:1.5rem 0;border:1px solid rgba(16,185,129,0.35);">
+  <div style="font-size:2.4rem;margin-bottom:0.6rem;">📋</div>
+  <div style="color:#fff;font-size:1.35rem;font-weight:700;margin-bottom:0.5rem;">
     <span class="_wdr_spin2"></span>Writing Your Day-by-Day Itinerary…
   </div>
-  <div style="color:#86efac;font-size:0.88rem;">
-    AI is crafting your personalised travel plan — this takes 20–40 seconds
+  <div style="color:#86efac;font-size:0.92rem;margin-bottom:0.4rem;">
+    AI is building your personalised travel plan with real prices &amp; timings
+  </div>
+  <div style="color:#4ade80;font-size:0.82rem;">
+    ⏱️ &nbsp;This usually takes 20–40 seconds — please wait
   </div>
 </div>""", unsafe_allow_html=True)
+        _pc = st.session_state.pop("pending_choices", None)
+        if _pc:
+            with st.spinner(""):
+                try:
+                    _final_r = app.invoke(Command(resume=_pc), config=config)
+                    st.session_state["latest_result"]        = _final_r
+                    st.session_state["waiting_for_approval"] = False
+                    st.session_state.pop("cached_pdf_bytes", None)   # invalidate PDF cache
+                except Exception as _exc:
+                    st.session_state["generating_final"] = False
+                    st.error(f"Itinerary generation failed: {_exc}")
+                    st.stop()
+        st.session_state["generating_final"] = False
+        st.rerun()
 
     # ── Tabs (research results) ───────────────────────────────────────────────
     tab_tr, tab_ht, tab_wx, tab_nb, tab_bud, tab_itin = st.tabs(
@@ -2036,22 +2201,8 @@ padding:1.6rem 2rem;text-align:center;margin:1rem 0;border:1px solid rgba(16,185
         else:
             st.markdown('<div class="tip-card"><div class="tip-card-text">Budget breakdown will appear here. Mention your budget in the request for a cost estimate.</div></div>', unsafe_allow_html=True)
 
-    # ── Itinerary tab — all plan states (building / approval / itinerary) ────────
+    # ── Itinerary tab — all plan states (approval / itinerary) ──────────────────
     with tab_itin:
-        # ── Final generation in progress ─────────────────────────────────────
-        if _gen_final:
-            _pc = st.session_state.pop("pending_choices", None)
-            if _pc:
-                with st.spinner("✍️  Crafting your personalised day-by-day itinerary…"):
-                    try:
-                        _final_r = app.invoke(Command(resume=_pc), config=config)
-                        st.session_state["latest_result"]        = _final_r
-                        st.session_state["waiting_for_approval"] = False
-                    except Exception as _exc:
-                        st.error(f"Itinerary generation failed: {_exc}")
-                st.session_state["generating_final"] = False
-                st.rerun()
-
         _final = st.session_state.get("latest_result") or {}
         if _final.get("final_response"):
             _dest_lbl = (_final.get("trip_constraints") or {}).get("destination", "your destination")
@@ -2084,14 +2235,63 @@ padding:1.6rem 2rem;text-align:center;margin:1rem 0;border:1px solid rgba(16,185
                 f'<div class="final-sub">Personalised itinerary · transport · hotels · weather · budget · what to say</div>'
                 f'</div>', unsafe_allow_html=True,
             )
-            st.markdown(_final["final_response"])
+            _resp_text = _final.get("final_response") or ""
+            # Strip fenced JSON blocks
+            _resp_text = re.sub(r'```json[\s\S]*?```', '', _resp_text, flags=re.IGNORECASE).strip()
+            # Strip bare JSON object at start via brace-counting
+            if _resp_text.startswith('{'):
+                _bd, _ei = 0, 0
+                for _ci, _ch in enumerate(_resp_text):
+                    if _ch == '{':
+                        _bd += 1
+                    elif _ch == '}':
+                        _bd -= 1
+                        if _bd == 0:
+                            _ei = _ci + 1
+                            break
+                if _ei > 0:
+                    _resp_text = _resp_text[_ei:].strip()
+
+            # ── Structured day-table render from itinerary_json ──────────────
+            import json as _ij
+            _itin_jstr  = _final.get("itinerary_json", "") or ""
+            _itin_jdata = {}
+            if _itin_jstr.strip():
+                try:
+                    _itin_jdata = _ij.loads(_itin_jstr)
+                except Exception:
+                    pass
+
+            if _itin_jdata.get("days"):
+                st.markdown(_render_itin_html(_itin_jdata), unsafe_allow_html=True)
+                # Show non-day prose sections (e.g. "What to Say & Do")
+                _extra = []
+                _in_extra = False
+                for _ln in _resp_text.split("\n"):
+                    _ls = _ln.strip()
+                    if _ls.startswith("## ") and "day" not in _ls.lower():
+                        _in_extra = True
+                    if _in_extra:
+                        _extra.append(_ln)
+                if _extra:
+                    st.markdown("\n".join(_extra))
+            else:
+                # Fallback: render prose markdown
+                st.markdown(_resp_text)
             st.divider()
+
+            # Cache PDF bytes so Download is instant after first render
+            _pdf_cache_key = f"pdf_{_dest_lbl}"
+            if st.session_state.get("_pdf_cache_key") != _pdf_cache_key or not st.session_state.get("cached_pdf_bytes"):
+                st.session_state["cached_pdf_bytes"] = _build_pdf_bytes(_final)
+                st.session_state["_pdf_cache_key"]   = _pdf_cache_key
+            _pdf_bytes = st.session_state["cached_pdf_bytes"]
 
             _col_pdf, _col_share = st.columns([3, 2])
             with _col_pdf:
                 st.download_button(
                     label="Download PDF",
-                    data=_build_pdf_bytes(_final),
+                    data=_pdf_bytes,
                     file_name=f"wandr_{_dest_lbl.replace(' ','_').lower()}.pdf",
                     mime="application/pdf",
                     use_container_width=True,

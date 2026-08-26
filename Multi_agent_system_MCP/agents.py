@@ -876,8 +876,20 @@ Remember: output JSON block first, then ---PROSE--- separator, then markdown sum
     else:
         # LLM skipped the separator — remove the JSON block so only the markdown remains
         prose = re.sub(r"```json[\s\S]*?```", "", result, flags=re.IGNORECASE).strip()
-        # Also strip a bare { ... } JSON object at the top (fallback extraction path)
-        prose = re.sub(r"^\s*\{[\s\S]*?\}\s*", "", prose).strip()
+        # Also strip a bare { ... } JSON object — use brace-counting so nested {} are handled
+        _p = prose.lstrip()
+        if _p.startswith("{"):
+            _bd, _ei = 0, 0
+            for _ci, _ch in enumerate(_p):
+                if _ch == "{":
+                    _bd += 1
+                elif _ch == "}":
+                    _bd -= 1
+                    if _bd == 0:
+                        _ei = _ci + 1
+                        break
+            if _ei > 0:
+                prose = _p[_ei:].strip()
 
     # Strip any leaked instruction text before the first real content line
     # (LLM sometimes echoes back instruction phrases before the actual ## Day 1 heading)
