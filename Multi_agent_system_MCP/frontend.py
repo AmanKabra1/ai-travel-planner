@@ -1328,28 +1328,58 @@ def _build_pdf_bytes(state: dict) -> bytes:
         first_section = False
         _draw_section_header(pdf, title, color)
 
-        # For the itinerary section: render structured day tables from JSON first
-        if title == "Complete Itinerary" and _itin_data.get("days"):
-            # Compact AI badge + total estimate on one line
-            pdf.set_font("Helvetica", "I", 7.5)
-            pdf.set_text_color(202, 138, 4)
-            pdf.set_x(pdf.l_margin)
-            ts = _itin_data.get("trip_summary", {})
-            badge = "AI-Generated — verify bookings before travel"
-            if ts.get("total_budget_estimate"):
-                badge += f"   |   Total: {_clean(str(ts['total_budget_estimate']))}"
-            pdf.cell(0, 5, badge, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            pdf.ln(1)
-
-            for day in _itin_data["days"]:
-                if pdf.get_y() > 248:
-                    pdf.add_page()
-                _draw_day_table(pdf, day, color)
-
-            # Skip prose fallback — budget detail is in Budget section
+        # For the itinerary section: always use structured day tables from JSON
+        if title == "Complete Itinerary":
+            if _itin_data.get("days"):
+                ts = _itin_data.get("trip_summary", {})
+                badge = "AI-Generated — verify bookings before travel"
+                if ts.get("total_budget_estimate"):
+                    badge += f"   |   Total: {_clean(str(ts['total_budget_estimate']))}"
+                pdf.set_font("Helvetica", "I", 7.5)
+                pdf.set_text_color(202, 138, 4)
+                pdf.set_x(pdf.l_margin)
+                pdf.cell(0, 5, badge, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.ln(1)
+                for day in _itin_data["days"]:
+                    if pdf.get_y() > 248:
+                        pdf.add_page()
+                    _draw_day_table(pdf, day, color)
+            else:
+                # JSON unavailable — strip raw JSON from prose before rendering
+                _clean_content = re.sub(r'```json[\s\S]*?```', '', content,
+                                        flags=re.IGNORECASE)
+                # Strip bare { ... } JSON objects via brace-counting
+                _out, _ci = [], 0
+                while _ci < len(_clean_content):
+                    if _clean_content[_ci] == '{':
+                        _d, _j, _ins, _cl = 0, _ci, False, False
+                        while _j < len(_clean_content):
+                            _ch = _clean_content[_j]
+                            if _ch == '"' and (_j == 0 or _clean_content[_j-1] != '\\'):
+                                _ins = not _ins
+                            if not _ins:
+                                if _ch == '{': _d += 1
+                                elif _ch == '}':
+                                    _d -= 1
+                                    if _d == 0:
+                                        _j += 1; _cl = True; break
+                            _j += 1
+                        if _cl and ('": ' in _clean_content[_ci:_j] or
+                                    '":"' in _clean_content[_ci:_j]):
+                            _ci = _j
+                            continue
+                    _out.append(_clean_content[_ci])
+                    _ci += 1
+                _clean_content = ''.join(_out).strip()
+                if _clean_content:
+                    _render_section(pdf, _clean_content)
+                else:
+                    pdf.set_font("Helvetica", "I", 9)
+                    pdf.set_text_color(148, 163, 184)
+                    pdf.multi_cell(eff_w, 6, "Itinerary data not available in this export.")
             continue
 
-        # ── Render section: tables via table(), text via write_html ─────────
+        # ── Render section: tables and prose (Nearby, Budget, etc.) ──────────
         _render_section(pdf, content)
 
     return bytes(pdf.output())
@@ -2130,18 +2160,20 @@ border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,.06);">
 
     # ── JSON-stripping helper (used in itinerary tab render) ─────────────────
     def _strip_json_from_prose(text: str, known_json: str = "") -> str:
-        """Remove all JSON blocks from prose so users never see raw JSON."""
+        """Remove JSON blocks from prose. Falls back to regex-only when safe."""
         if not text:
             return ""
+        # 1. Remove known JSON string verbatim (most reliable)
         if known_json and known_json in text:
             text = text.replace(known_json, "")
+        # 2. Remove fenced ```json ... ``` blocks
         text = re.sub(r'```json[\s\S]*?```', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'```[\s\S]*?```', lambda m: ""
-                      if m.group().lstrip('`\n').startswith('{') else m.group(), text)
+        # 3. Remove bare JSON objects — only strip a block if it is CLOSED and
+        #    looks like JSON (has key: value syntax). An unclosed { is kept.
         result, i = [], 0
         while i < len(text):
             if text[i] == '{':
-                depth, j, in_str = 0, i, False
+                depth, j, in_str, closed = 0, i, False, False
                 while j < len(text):
                     ch = text[j]
                     if ch == '"' and (j == 0 or text[j-1] != '\\'):
@@ -2153,14 +2185,18 @@ border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,.06);">
                             depth -= 1
                             if depth == 0:
                                 j += 1
+                                closed = True
                                 break
                     j += 1
-                snippet = text[i:j]
-                if '": ' in snippet or '":"' in snippet:
-                    i = j
-                else:
-                    result.append(text[i])
-                    i += 1
+                # Only skip if the block is CLOSED and contains JSON key syntax
+                if closed:
+                    snippet = text[i:j]
+                    if '": ' in snippet or '":"' in snippet:
+                        i = j      # skip JSON block
+                        continue
+                # Not JSON or unclosed — keep the { character
+                result.append(text[i])
+                i += 1
             else:
                 result.append(text[i])
                 i += 1
