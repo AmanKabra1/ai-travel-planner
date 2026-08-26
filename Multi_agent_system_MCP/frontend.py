@@ -1,4 +1,5 @@
 ﻿import json
+import re
 import sys
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -2166,7 +2167,29 @@ margin:1.5rem 0;border:1px solid rgba(16,185,129,0.35);">
                     st.error(f"Itinerary generation failed: {_exc}")
                     st.stop()
         st.session_state["generating_final"] = False
+        st.session_state["open_itin_tab"]   = True   # trigger JS tab switch on next render
         st.rerun()
+
+    # ── Auto-switch to Itinerary tab after generation ─────────────────────────
+    if st.session_state.pop("open_itin_tab", False):
+        import streamlit.components.v1 as _cmp
+        _cmp.html("""
+<script>
+(function() {
+  function clickItinTab() {
+    var tabs = window.parent.document.querySelectorAll('[role="tab"]');
+    if (tabs.length >= 6) {
+      tabs[5].click();   // 6th tab = Itinerary (0-indexed: 5)
+    } else if (tabs.length > 0) {
+      tabs[tabs.length - 1].click();
+    }
+  }
+  // Try immediately then retry after Streamlit finishes painting
+  clickItinTab();
+  setTimeout(clickItinTab, 300);
+  setTimeout(clickItinTab, 700);
+})();
+</script>""", height=0)
 
     # ── Tabs (research results) ───────────────────────────────────────────────
     tab_tr, tab_ht, tab_wx, tab_nb, tab_bud, tab_itin = st.tabs(
