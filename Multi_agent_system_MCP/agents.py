@@ -60,6 +60,8 @@ def _llm_text(system: str, prompt: str) -> str:
 
     Both providers pass through _extract_content() so markdown structure
     (headers, tables, bullets) is preserved regardless of which model responds.
+    If a reasoning model returns only a <think> block (empty after stripping),
+    the result is discarded and the next model is tried automatically.
     """
     global llm
     msgs = [SystemMessage(content=system), HumanMessage(content=prompt)]
@@ -69,8 +71,11 @@ def _llm_text(system: str, prompt: str) -> str:
     if gemini is not None:
         try:
             text = _extract_content(gemini.invoke(msgs))
-            logger.info("Gemini responded OK (%d chars)", len(text))
-            return _strip_think(text)
+            cleaned = _strip_think(text)
+            if cleaned:
+                logger.info("Gemini responded OK (%d chars)", len(cleaned))
+                return cleaned
+            logger.warning("Gemini returned only a think block — falling back to Groq")
         except Exception as exc:
             logger.warning("Gemini failed, falling back to Groq: %s", str(exc)[:300])
 
@@ -81,8 +86,19 @@ def _llm_text(system: str, prompt: str) -> str:
         current = getattr(llm, "model_name", "") or getattr(llm, "model", "")
         try:
             text = _extract_content(llm.invoke(msgs))
-            logger.info("Groq %s responded OK (%d chars)", current, len(text))
-            return _strip_think(text)
+            cleaned = _strip_think(text)
+            if not cleaned:
+                # Reasoning model returned only <think> — try next model
+                logger.warning("Groq %s returned only a think block; switching model", current)
+                tried.add(current)
+                next_models = [m for m in retry_list if m not in tried]
+                if next_models:
+                    llm = get_llm(next_models[0])
+                    continue
+                # All models only think — return raw content with tags removed as last resort
+                return text.replace("<think>", "").replace("</think>", "").strip()
+            logger.info("Groq %s responded OK (%d chars)", current, len(cleaned))
+            return cleaned
         except Exception as exc:
             tried.add(current)
             exc_str = str(exc)
@@ -295,22 +311,31 @@ def hotel_agent(state: TravelState):
         search_text = "Live search unavailable."
 
     result = _llm_text(
-        "You are a hotel specialist. Output ONLY markdown tables grouped by area. Write each area ONCE.",
+        "You are a hotel specialist. Use REAL names and prices from the search data. Write each area ONCE.",
         f"""Hotel recommendations for: {destination}
 User request: {state['user_query']}
 
 Search results (with booking links):
 {search_text[:4000]}
 
-Group hotels by area. For each area output a table:
+Group hotels by area/neighbourhood. For each area:
 
 ### [Area / Neighbourhood Name]
+1–2 sentence description of the area and why it suits travellers.
+
 | Hotel | Price/Night (₹) | Type | Rating | Highlights | Book |
 |-------|----------------|------|--------|------------|------|
 (budget / standard / premium rows; hyperlink hotel name to booking URL if available)
 
 Cover at least 3 areas. Include a mix of budget, mid-range, and premium options.
-Do NOT output bullet lists or prose. Tables only.
+
+After all area tables add:
+
+## 💡 Booking Tips
+2–3 practical tips (best booking platform, when to book, what to watch out for).
+
+## ⚠️ Watch Out
+One short paragraph on common issues (hidden charges, location traps, etc.).
 """,
     )
 
@@ -341,7 +366,7 @@ def transport_agent(state: TravelState):
     )
 
     result = _llm_text(
-        "You are a transport specialist. Output ONLY markdown tables — no bullet lists, no prose paragraphs. Write each section ONCE.",
+        "You are a transport specialist. Use REAL train/flight/bus names from the data. Write each section ONCE.",
         f"""Transport guide for: {route_str}
 User request: {state['user_query']}
 
@@ -351,17 +376,17 @@ TRAIN (VIA): {train_via[:800]}
 BUS DATA: {bus_search[:800]}
 GENERAL: {general[:600]}
 
-Output these sections with markdown tables:
-
 ## ✈️ Flights
+Brief note on flight availability (1 sentence).
 | Airline | Route | Fare (₹) | Duration | Book |
 |---------|-------|----------|----------|------|
-(one row per option; if no direct flight add row "Via [Hub] – [Airline]"; if no data write "No flights — nearest airport: [X] ([Y] km)")
+(if no direct flight: "Via [Hub] – [Airline]"; if no data: "No flights — nearest airport: [X] ([Y] km)")
 
 ## 🚂 Trains
+Best train recommendation in 1 sentence, then the table:
 | Train Name | No. | Departs | Arrives | Duration | Fare Sl/3A/2A | Book |
 |-----------|-----|---------|---------|----------|---------------|------|
-(for connecting trains add separate rows labelled "Leg 1" / "Leg 2" with junction city)
+(connecting trains: label rows "Leg 1" / "Leg 2" with junction city)
 [Book on IRCTC](https://www.irctc.co.in)
 
 ## 🚌 Buses
@@ -372,12 +397,8 @@ Output these sections with markdown tables:
 | Route (Highway) | Distance | Drive Time | Est. Fuel+Toll |
 |----------------|---------|-----------|----------------|
 
-## 💡 Best Option
-| Budget | Mid-Range | Premium |
-|--------|-----------|---------|
-| [pick] | [pick] | [pick] |
-
-Use REAL train names and numbers from data. For Indian routes always link IRCTC.
+## 💡 Recommendation
+2–3 sentences: which option is best for budget / comfort / speed travellers on this specific route, and why.
 """,
     )
 
@@ -547,7 +568,7 @@ def nearby_agent(state: TravelState):
         }
 
     result = _llm_text(
-        "You are a local expert. Use REAL names from the data. Output markdown tables for every section. No bullet lists or prose paragraphs.",
+        "You are a local expert. Use REAL names from the data. Mix tables with brief descriptions where helpful.",
         f"""Local guide for {destination}, {region}, {country}.
 
 MAP DATA (POIs): {bucket_txt[:600]}
@@ -558,23 +579,28 @@ EXPERIENCES: {t_exp[:600]}
 HIDDEN GEMS: {t_gems[:500]}
 LOCAL TRANSPORT: {t_tips[:500]}
 
-Output these sections — use tables throughout:
-
 ## 📍 Nearby Attractions
+1–2 sentences about what makes {destination} special for visitors.
+
 ### Within 10 km
 | Place | Type | Distance | Entry Fee | Best Time |
 |-------|------|---------|-----------|-----------|
+
 ### 10–30 km — Day Trips
 | Place | Type | Distance | Entry Fee | Best Time |
 |-------|------|---------|-----------|-----------|
+
 ### 30–100 km — Excursions
 | Place | Type | Distance | Entry Fee | Best Time |
 |-------|------|---------|-----------|-----------|
 
 ## 🍜 Local Food Guide
+Brief intro (1 sentence) on the food culture of {destination}.
+
 ### Must-Eat Dishes
 | Dish | Description | Where to Find | Price (₹) |
 |------|------------|--------------|-----------|
+
 ### Best Restaurants & Dhabas
 | Name | Specialty | Price/Person (₹) | Area |
 |------|-----------|-----------------|------|
@@ -584,6 +610,7 @@ Output these sections — use tables throughout:
 |--------|-------|-----------|---------------|
 
 ## 🎭 Local Experiences
+1 sentence on the must-do experience in {destination}, then the table:
 | Activity | Where | Timing | Cost (₹) |
 |---------|-------|--------|---------|
 
@@ -594,6 +621,9 @@ Output these sections — use tables throughout:
 ## 🚌 Getting Around Locally
 | Mode | Typical Fare | Notes |
 |------|-------------|-------|
+
+## 💡 Insider Tips
+2–3 practical tips a first-time visitor to {destination} must know.
 
 Use REAL place names from MAP DATA and WEB RESEARCH.
 """,
