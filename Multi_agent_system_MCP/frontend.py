@@ -1158,6 +1158,7 @@ def _build_pdf_bytes(state: dict) -> bytes:
         _MAX_TABLES = 2
         _MAX_ROWS   = 4
         text = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<think>.*",          "", text,    flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
         text = re.sub(r"\[([^\]]+)\]\(https?://[^\)]+\)", r"\1", text)
         text = re.sub(r"<https?://[^>]+>", "", text)
@@ -2006,7 +2007,7 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "hotel_results
     with tab_nb:
         _c = _clean_tab(result.get("nearby_results") or "")
         if _c:
-            st.markdown(_clean_tab(_c))
+            st.markdown(_c)
         else:
             st.markdown('<div class="tip-card"><div class="tip-card-text">Nearby attractions, local food & markets will appear here.</div></div>', unsafe_allow_html=True)
     with tab_bud:
