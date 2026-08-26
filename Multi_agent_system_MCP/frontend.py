@@ -1850,6 +1850,15 @@ if _is_running:
 
 # ── Stage 1: Button clicked → save inputs, set running, rerun ─────────────────
 if run and not _is_running:
+    # Always start a fresh thread so we don't collide with old checkpoints
+    # (opening a failed/interrupted trip from history sets the old thread_id)
+    st.session_state["thread_id"] = f"{username}_{uuid.uuid4().hex[:8]}"
+    st.session_state.pop("latest_result",        None)
+    st.session_state.pop("waiting_for_approval", None)
+    st.session_state.pop("generating_final",     None)
+    st.session_state.pop("pending_choices",      None)
+    st.session_state.pop("cached_pdf_bytes",     None)
+
     _origin    = st.session_state.get("from_input",    "").strip()
     _dest      = st.session_state.get("to_input",      "").strip()
     _s_date    = st.session_state.get("start_date",    date.today())
