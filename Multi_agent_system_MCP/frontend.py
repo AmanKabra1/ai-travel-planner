@@ -2128,6 +2128,44 @@ border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,.06);">
 
         return "\n".join(parts)
 
+    # ── JSON-stripping helper (used in itinerary tab render) ─────────────────
+    def _strip_json_from_prose(text: str, known_json: str = "") -> str:
+        """Remove all JSON blocks from prose so users never see raw JSON."""
+        if not text:
+            return ""
+        if known_json and known_json in text:
+            text = text.replace(known_json, "")
+        text = re.sub(r'```json[\s\S]*?```', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'```[\s\S]*?```', lambda m: ""
+                      if m.group().lstrip('`\n').startswith('{') else m.group(), text)
+        result, i = [], 0
+        while i < len(text):
+            if text[i] == '{':
+                depth, j, in_str = 0, i, False
+                while j < len(text):
+                    ch = text[j]
+                    if ch == '"' and (j == 0 or text[j-1] != '\\'):
+                        in_str = not in_str
+                    if not in_str:
+                        if ch == '{':
+                            depth += 1
+                        elif ch == '}':
+                            depth -= 1
+                            if depth == 0:
+                                j += 1
+                                break
+                    j += 1
+                snippet = text[i:j]
+                if '": ' in snippet or '":"' in snippet:
+                    i = j
+                else:
+                    result.append(text[i])
+                    i += 1
+            else:
+                result.append(text[i])
+                i += 1
+        return ''.join(result).strip()
+
     _gen_final = st.session_state.get("generating_final", False)
 
     # ── Final itinerary generation — run ABOVE tabs so spinner is visible ──────
@@ -2267,38 +2305,24 @@ margin:1.5rem 0;border:1px solid rgba(16,185,129,0.35);">
                 f'<div class="final-sub">Personalised itinerary · transport · hotels · weather · budget · what to say</div>'
                 f'</div>', unsafe_allow_html=True,
             )
-            _resp_text = _final.get("final_response") or ""
-            # Strip fenced JSON blocks
-            _resp_text = re.sub(r'```json[\s\S]*?```', '', _resp_text, flags=re.IGNORECASE).strip()
-            # Strip bare JSON object at start via brace-counting
-            if _resp_text.startswith('{'):
-                _bd, _ei = 0, 0
-                for _ci, _ch in enumerate(_resp_text):
-                    if _ch == '{':
-                        _bd += 1
-                    elif _ch == '}':
-                        _bd -= 1
-                        if _bd == 0:
-                            _ei = _ci + 1
-                            break
-                if _ei > 0:
-                    _resp_text = _resp_text[_ei:].strip()
-
-            # ── Structured day-table render from itinerary_json ──────────────
-            import json as _ij
+            # ── Parse itinerary_json + strip JSON from prose ─────────────────
             _itin_jstr  = _final.get("itinerary_json", "") or ""
             _itin_jdata = {}
             if _itin_jstr.strip():
                 try:
-                    _itin_jdata = _ij.loads(_itin_jstr)
+                    _itin_jdata = json.loads(_itin_jstr)
                 except Exception:
                     pass
 
+            _resp_text = _strip_json_from_prose(
+                _final.get("final_response") or "", _itin_jstr
+            )
+
+            # ── Render: structured HTML tables (preferred) ───────────────────
             if _itin_jdata.get("days"):
                 st.markdown(_render_itin_html(_itin_jdata), unsafe_allow_html=True)
                 # Show non-day prose sections (e.g. "What to Say & Do")
-                _extra = []
-                _in_extra = False
+                _extra, _in_extra = [], False
                 for _ln in _resp_text.split("\n"):
                     _ls = _ln.strip()
                     if _ls.startswith("## ") and "day" not in _ls.lower():
@@ -2307,9 +2331,13 @@ margin:1.5rem 0;border:1px solid rgba(16,185,129,0.35);">
                         _extra.append(_ln)
                 if _extra:
                     st.markdown("\n".join(_extra))
-            else:
-                # Fallback: render prose markdown
+
+            elif _resp_text:
+                # Fallback: clean prose/markdown — JSON already stripped above
                 st.markdown(_resp_text)
+
+            else:
+                st.info("Itinerary content is being processed. If this persists, regenerate the plan.")
             st.divider()
 
             # Cache PDF bytes so Download is instant after first render
@@ -2344,7 +2372,19 @@ margin:1.5rem 0;border:1px solid rgba(16,185,129,0.35);">
                 st.caption("Anyone with this link can view your plan — no login needed.")
 
         elif _final.get("itinerary"):
-            st.markdown(_final["itinerary"])
+            _itin_j2_str = _final.get("itinerary_json", "") or ""
+            _itin_j2 = {}
+            if _itin_j2_str.strip():
+                try:
+                    _itin_j2 = json.loads(_itin_j2_str)
+                except Exception:
+                    pass
+            if _itin_j2.get("days"):
+                st.markdown(_render_itin_html(_itin_j2), unsafe_allow_html=True)
+            else:
+                _raw_itin = _strip_json_from_prose(_final["itinerary"], _itin_j2_str)
+                if _raw_itin:
+                    st.markdown(_raw_itin)
         elif st.session_state.get("waiting_for_approval") and not _gen_final:
             # ── Approval form lives here so the user sees it immediately ──────
             _apr_res = st.session_state.get("latest_result", {}) or {}
