@@ -1973,7 +1973,26 @@ if result and any(result.get(k) for k in ("supervisor_reasoning", "hotel_results
     m4.metric("Status",        status_label)
 
     _gen_final = st.session_state.get("generating_final", False)
-    # (All generation/approval UI is inside the Itinerary tab below)
+
+    # ── Itinerary-generation banner (shown while final plan is being written) ──
+    if _gen_final:
+        st.markdown("""
+<style>
+@keyframes _wdr_spin2{to{transform:rotate(360deg)}}
+._wdr_spin2{display:inline-block;width:24px;height:24px;border:3px solid rgba(16,185,129,0.25);
+border-top-color:#10b981;border-radius:50%;animation:_wdr_spin2 0.9s linear infinite;
+vertical-align:middle;margin-right:8px;}
+</style>
+<div style="background:linear-gradient(135deg,#052e16 0%,#14532d 100%);border-radius:14px;
+padding:1.6rem 2rem;text-align:center;margin:1rem 0;border:1px solid rgba(16,185,129,0.35);">
+  <div style="font-size:2rem;margin-bottom:0.4rem;">📋</div>
+  <div style="color:#fff;font-size:1.2rem;font-weight:700;margin-bottom:0.4rem;">
+    <span class="_wdr_spin2"></span>Writing Your Day-by-Day Itinerary…
+  </div>
+  <div style="color:#86efac;font-size:0.88rem;">
+    AI is crafting your personalised travel plan — this takes 20–40 seconds
+  </div>
+</div>""", unsafe_allow_html=True)
 
     # ── Tabs (research results) ───────────────────────────────────────────────
     tab_tr, tab_ht, tab_wx, tab_nb, tab_bud, tab_itin = st.tabs(

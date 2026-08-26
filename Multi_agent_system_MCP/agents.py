@@ -870,11 +870,14 @@ Remember: output JSON block first, then ---PROSE--- separator, then markdown sum
     except (ValueError, json.JSONDecodeError):
         logger.warning("Itinerary JSON extraction failed; prose-only mode")
 
-    # Extract the prose section (after ---PROSE--- if present, else use full text)
+    # Extract the prose section (after ---PROSE--- if present, else strip JSON from full text)
     if "---PROSE---" in result:
         prose = result.split("---PROSE---", 1)[1].strip()
     else:
-        prose = result
+        # LLM skipped the separator — remove the JSON block so only the markdown remains
+        prose = re.sub(r"```json[\s\S]*?```", "", result, flags=re.IGNORECASE).strip()
+        # Also strip a bare { ... } JSON object at the top (fallback extraction path)
+        prose = re.sub(r"^\s*\{[\s\S]*?\}\s*", "", prose).strip()
 
     # Strip any leaked instruction text before the first real content line
     # (LLM sometimes echoes back instruction phrases before the actual ## Day 1 heading)
