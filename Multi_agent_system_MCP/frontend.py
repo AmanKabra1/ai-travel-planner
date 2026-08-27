@@ -548,10 +548,50 @@ button[kind="header"]               { display: none !important; }
 
 # ── Tab content cleaner ───────────────────────────────────────────────────────
 def _clean_tab(text: str, max_chars: int = 10000) -> str:
-    """Remove runaway repetition and cap length for tab display."""
+    """Strip JSON, think tags, repetition; cap length for tab display."""
     if not text:
         return text
     import re as _re_ct
+    # ── Strip all JSON before showing to the user ─────────────────────────────
+    # Fenced blocks: closed first, then unclosed/truncated
+    text = _re_ct.sub(r'```[a-z]*[ \t]*\n[\s\S]*?```', '', text, flags=_re_ct.IGNORECASE)
+    text = _re_ct.sub(r'```[a-z]*[ \t]*\n[\s\S]*',     '', text, flags=_re_ct.IGNORECASE)
+    # Bracket-counting: strip bare {…} and […] blocks that look like JSON
+    _out, _ci, _cn = [], 0, len(text)
+    while _ci < _cn:
+        _c0 = text[_ci]
+        if _c0 in ('{', '['):
+            _oc = _c0; _cc = '}' if _c0 == '{' else ']'
+            _d, _j, _ins, _cl = 0, _ci, False, False
+            while _j < _cn:
+                _ch = text[_j]
+                if _ch == '"' and (_j == 0 or text[_j - 1] != '\\'):
+                    _ins = not _ins
+                if not _ins:
+                    if _ch == _oc:  _d += 1
+                    elif _ch == _cc:
+                        _d -= 1
+                        if _d == 0:
+                            _j += 1; _cl = True; break
+                _j += 1
+            _pk = text[_ci:min(_ci + 300, _cn)]
+            if not _cl and ('": ' in _pk or '":"' in _pk):
+                _ci = _cn; continue          # truncated JSON → drop to end
+            if _cl and ('": ' in text[_ci:_j] or '":"' in text[_ci:_j]):
+                _ci = _j; continue           # closed JSON block → skip
+        _out.append(text[_ci]); _ci += 1
+    text = ''.join(_out)
+    # Line-level filter: drop any remaining pure JSON lines
+    _jln = _re_ct.compile(
+        r'^\s*(?:`+[a-z]*`*|json|"[^"]*"\s*:.*'
+        r'|"[^"]*"\s*,?\s*$|[{\}\[\]]\s*,?\s*$'
+        r'|null\s*,?\s*$|true\s*,?\s*$|false\s*,?\s*$)\s*$',
+        _re_ct.IGNORECASE
+    )
+    text = '\n'.join(ln for ln in text.split('\n') if not _jln.match(ln))
+    text = _re_ct.sub(r'^\s*[,\[\]\{\}]\s*$', '', text, flags=_re_ct.MULTILINE)
+    text = _re_ct.sub(r'\n{3,}', '\n\n', text).strip()
+    # ── Strip <think> tags ────────────────────────────────────────────────────
     # Strip complete <think>...</think> pairs
     text = _re_ct.sub(r'<think>.*?</think>', '', text, flags=_re_ct.DOTALL | _re_ct.IGNORECASE)
     # Strip any unclosed <think> tag (LLM truncated mid-think — cut from tag to end)
@@ -1451,12 +1491,12 @@ if _share_param:
             unsafe_allow_html=True,
         )
         if _shared.get("final_response"):
-            st.markdown(_shared["final_response"])
+            st.markdown(_clean_tab(_shared["final_response"]))
         elif _shared.get("itinerary"):
-            st.markdown(_shared["itinerary"])
+            st.markdown(_clean_tab(_shared["itinerary"]))
         if _shared.get("nearby_results"):
             st.divider()
-            st.markdown(_shared["nearby_results"])
+            st.markdown(_clean_tab(_shared["nearby_results"]))
         st.divider()
         _back_col, _brand_col = st.columns([1, 3])
         with _back_col:
