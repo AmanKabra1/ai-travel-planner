@@ -512,31 +512,29 @@ def nearby_agent(state: TravelState):
             "messages":       [AIMessage(content="Nearby agent skipped (no destination).")],
         }
 
-    # ── Geocode ──────────────────────────────────────────────────────────────
+    # ── Geocode (non-fatal — Tavily runs regardless) ─────────────────────────
     geo = geocode_city(destination)
-    if not geo:
-        return {
-            "nearby_results": f"Could not locate {destination} on the map — nearby search skipped.",
-            "messages":       [AIMessage(content="Nearby agent: geocoding failed.")],
-        }
-    lat, lon, geo_meta = geo
-    region  = geo_meta.get("region", "")
-    country = geo_meta.get("country", "")
-    place_type = geo_meta.get("place_type", "")
-    logger.info("Nearby agent — '%s' (%s) coords: %.4f, %.4f", destination, place_type, lat, lon)
+    lat = lon = None
+    region = country = place_type = ""
+    if geo:
+        lat, lon, geo_meta = geo
+        region     = geo_meta.get("region", "")
+        country    = geo_meta.get("country", "")
+        place_type = geo_meta.get("place_type", "")
+        logger.info("Nearby agent — '%s' (%s) coords: %.4f, %.4f", destination, place_type, lat, lon)
+    else:
+        logger.warning("Nearby agent — geocoding failed for '%s'; continuing with web-only data", destination)
 
-    dest_enc = destination.replace(" ", "+")
-    gmaps    = f"https://www.google.com/maps/search/{dest_enc}"
-
-    # ── Overpass POIs (smaller radius = faster; guarded against timeout) ──────
-    try:
-        pois    = overpass_nearby(lat, lon, radius_m=50_000)   # 50 km, not 100 km
-        buckets = bucket_pois(pois)
-        logger.info("Nearby agent — %d POIs found", len(pois))
-    except Exception as exc:
-        logger.warning("Overpass failed, continuing without map data: %s", exc)
-        pois    = []
-        buckets = {"within_10km": [], "10_to_30km": [], "30_to_50km": [], "50_to_100km": []}
+    # ── Overpass POIs (only when coordinates are available) ──────────────────
+    pois    = []
+    buckets = {"within_10km": [], "10_to_30km": [], "30_to_50km": [], "50_to_100km": []}
+    if lat is not None:
+        try:
+            pois    = overpass_nearby(lat, lon, radius_m=50_000)
+            buckets = bucket_pois(pois)
+            logger.info("Nearby agent — %d POIs found", len(pois))
+        except Exception as exc:
+            logger.warning("Overpass failed, continuing without map data: %s", exc)
 
     # ── 6 parallel Tavily searches: attractions + food + markets + experiences + gems + transport ──
     try:
