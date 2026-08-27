@@ -880,21 +880,29 @@ Remember: output JSON block first, then ---PROSE--- separator, then markdown sum
     if "---PROSE---" in result:
         prose = result.split("---PROSE---", 1)[1].strip()
     else:
-        # LLM skipped the separator — remove ALL fenced code blocks then bare JSON
-        prose = re.sub(r"```[a-z]*\n[\s\S]*?```", "", result, flags=re.IGNORECASE).strip()
+        # LLM skipped the separator — strip ALL fenced blocks (closed + unclosed)
+        prose = re.sub(r"```[a-z]*[ \t]*\n[\s\S]*?```", "", result, flags=re.IGNORECASE)
+        prose = re.sub(r"```[a-z]*[ \t]*\n[\s\S]*",     "", prose,  flags=re.IGNORECASE)
+        prose = prose.strip()
         # Strip bare { … } and [ … ] JSON blocks via bracket-counting
+        # If block is unclosed (truncated JSON), drop everything from that point
         def _bracket_strip(s, open_c, close_c):
             s = s.lstrip()
             if not s.startswith(open_c):
                 return s
-            _bd, _ei = 0, 0
+            _bd, _ei, _found = 0, 0, False
             for _ci, _ch in enumerate(s):
                 if _ch == open_c:  _bd += 1
                 elif _ch == close_c:
                     _bd -= 1
                     if _bd == 0:
-                        _ei = _ci + 1; break
-            return s[_ei:].strip() if _ei > 0 else s
+                        _ei = _ci + 1; _found = True; break
+            if _found:
+                return s[_ei:].strip()
+            # Unclosed — check if it looks like JSON; if so, discard everything
+            if '": ' in s[:300] or '":"' in s[:300]:
+                return ""
+            return s
         prose = _bracket_strip(prose, "{", "}")
         prose = _bracket_strip(prose, "[", "]")
 
