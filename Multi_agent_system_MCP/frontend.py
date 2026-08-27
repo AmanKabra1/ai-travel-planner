@@ -1160,6 +1160,11 @@ def _build_pdf_bytes(state: dict) -> bytes:
         _MAX_ROWS   = 20
         text = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r"<think>.*",          "", text,    flags=re.DOTALL | re.IGNORECASE)
+        # Strip fenced code blocks and bare JSON lines before rendering
+        text = re.sub(r'```[a-z]*\n[\s\S]*?```', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'```[\s\S]*?```', '', text)
+        _jln = re.compile(r'^\s*(?:"[^"]*"\s*:\s*|"[^"]*"\s*,?\s*$|[{\}\[\]]\s*,?)\s*$')
+        text = '\n'.join(ln for ln in text.split('\n') if not _jln.match(ln))
         text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
         text = re.sub(r"\[([^\]]+)\]\(https?://[^\)]+\)", r"\1", text)
         text = re.sub(r"<https?://[^>]+>", "", text)
@@ -1381,8 +1386,17 @@ def _build_pdf_bytes(state: dict) -> bytes:
                             _ci = _j; continue
                     _out.append(_clean_content[_ci])
                     _ci += 1
-                _clean_content = re.sub(r'^\s*[,\[\]]\s*$', '',
-                                        ''.join(_out), flags=re.MULTILINE)
+                _clean_content = ''.join(_out)
+                # Line-by-line pass: drop any remaining pure JSON lines
+                _json_ln = re.compile(
+                    r'^\s*(?:"[^"]*"\s*:\s*|"[^"]*"\s*,?\s*$|[{\}\[\]]\s*,?)\s*$'
+                )
+                _clean_content = '\n'.join(
+                    ln for ln in _clean_content.split('\n')
+                    if not _json_ln.match(ln)
+                )
+                _clean_content = re.sub(r'^\s*[,\[\]\{\}]\s*$', '',
+                                        _clean_content, flags=re.MULTILINE)
                 _clean_content = re.sub(r'\n{3,}', '\n\n', _clean_content).strip()
                 if _clean_content:
                     _render_section(pdf, _clean_content)
@@ -2172,17 +2186,26 @@ border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,.06);">
         return "\n".join(parts)
 
     # ── JSON-stripping helper (used in itinerary tab render) ─────────────────
+    # Pattern that matches a single line that is pure JSON syntax
+    _JSON_LINE_RE = re.compile(
+        r'^\s*(?:'
+        r'"[^"\\]*(?:\\.[^"\\]*)*"\s*:\s*'  # "key":
+        r'|"[^"\\]*(?:\\.[^"\\]*)*"\s*,?\s*$'  # "value",
+        r'|[{\}\[\]]\s*,?'                   # { } [ ]
+        r')\s*$'
+    )
+
     def _strip_json_from_prose(text: str, known_json: str = "") -> str:
-        """Remove JSON objects and arrays from prose text."""
+        """Remove all JSON blocks and lines from prose text."""
         if not text:
             return ""
-        # 1. Remove known JSON string verbatim (most reliable)
+        # 1. Remove known JSON string verbatim
         if known_json and known_json in text:
             text = text.replace(known_json, "")
-        # 2. Remove ALL fenced code blocks that contain JSON key syntax
+        # 2. Remove fenced code blocks (```json or plain ```)
         text = re.sub(r'```[a-z]*\n[\s\S]*?```', '', text, flags=re.IGNORECASE)
-        # 3. Remove bare JSON objects {…} and arrays […] via bracket-counting.
-        #    Strips both { and [ started blocks that contain "key": patterns.
+        text = re.sub(r'```[\s\S]*?```', '', text)
+        # 3. Remove bare {…} and […] blocks via bracket-counting
         result, i, n = [], 0, len(text)
         while i < n:
             ch = text[i]
@@ -2201,7 +2224,6 @@ border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,.06);">
                                 j += 1; closed = True; break
                     j += 1
                 if not closed:
-                    # rfind fallback for unclosed blocks
                     last_j = text.rfind(close_c, i)
                     if last_j > i:
                         j = last_j + 1; closed = True
@@ -2211,8 +2233,23 @@ border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,.06);">
                         i = j; continue
             result.append(text[i])
             i += 1
-        # 4. Clean up stray comma / bracket lines left after stripping
-        cleaned = re.sub(r'^\s*[,\[\]]\s*$', '', ''.join(result), flags=re.MULTILINE)
+        text = ''.join(result)
+        # 4. Line-by-line pass: drop any remaining lines that look like JSON
+        kept = []
+        for ln in text.split('\n'):
+            if _JSON_LINE_RE.match(ln):
+                continue        # drop pure JSON lines
+            # Also drop lines that are ONLY a quoted string (lone "value")
+            stripped = ln.strip()
+            if stripped.startswith('"') and stripped.endswith(('"', '",', '",')):
+                inner = stripped.strip('"').rstrip(',').strip()
+                # Keep if it looks like a normal sentence (has spaces, letters)
+                if not (' ' in inner and any(c.isalpha() for c in inner)):
+                    if re.match(r'^"[^"]+"\s*,?\s*$', stripped):
+                        continue
+            kept.append(ln)
+        # 5. Clean up stray comma/bracket-only lines and extra blank lines
+        cleaned = re.sub(r'^\s*[,\[\]\{\}]\s*$', '', '\n'.join(kept), flags=re.MULTILINE)
         cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
         return cleaned.strip()
 
