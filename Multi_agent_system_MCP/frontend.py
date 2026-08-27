@@ -1351,32 +1351,39 @@ def _build_pdf_bytes(state: dict) -> bytes:
                         pdf.add_page()
                     _draw_day_table(pdf, day, color)
             else:
-                # JSON unavailable — strip raw JSON from prose before rendering
-                _clean_content = re.sub(r'```json[\s\S]*?```', '', content,
+                # JSON unavailable — strip JSON from prose before rendering
+                _clean_content = re.sub(r'```[a-z]*\n[\s\S]*?```', '', content,
                                         flags=re.IGNORECASE)
-                # Strip bare { ... } JSON objects via brace-counting
-                _out, _ci = [], 0
-                while _ci < len(_clean_content):
-                    if _clean_content[_ci] == '{':
+                # Strip bare {…} and […] JSON blocks via bracket-counting
+                _out, _ci, _cn = [], 0, len(_clean_content)
+                while _ci < _cn:
+                    _c0 = _clean_content[_ci]
+                    if _c0 in ('{', '['):
+                        _oc, _cc2 = _c0, ('}' if _c0 == '{' else ']')
                         _d, _j, _ins, _cl = 0, _ci, False, False
-                        while _j < len(_clean_content):
+                        while _j < _cn:
                             _ch = _clean_content[_j]
                             if _ch == '"' and (_j == 0 or _clean_content[_j-1] != '\\'):
                                 _ins = not _ins
                             if not _ins:
-                                if _ch == '{': _d += 1
-                                elif _ch == '}':
+                                if _ch == _oc: _d += 1
+                                elif _ch == _cc2:
                                     _d -= 1
                                     if _d == 0:
                                         _j += 1; _cl = True; break
                             _j += 1
+                        if not _cl:
+                            _lj = _clean_content.rfind(_cc2, _ci)
+                            if _lj > _ci:
+                                _j = _lj + 1; _cl = True
                         if _cl and ('": ' in _clean_content[_ci:_j] or
                                     '":"' in _clean_content[_ci:_j]):
-                            _ci = _j
-                            continue
+                            _ci = _j; continue
                     _out.append(_clean_content[_ci])
                     _ci += 1
-                _clean_content = ''.join(_out).strip()
+                _clean_content = re.sub(r'^\s*[,\[\]]\s*$', '',
+                                        ''.join(_out), flags=re.MULTILINE)
+                _clean_content = re.sub(r'\n{3,}', '\n\n', _clean_content).strip()
                 if _clean_content:
                     _render_section(pdf, _clean_content)
                 else:
@@ -2166,55 +2173,48 @@ border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,.06);">
 
     # ── JSON-stripping helper (used in itinerary tab render) ─────────────────
     def _strip_json_from_prose(text: str, known_json: str = "") -> str:
-        """Remove JSON blocks from prose. Falls back to regex-only when safe."""
+        """Remove JSON objects and arrays from prose text."""
         if not text:
             return ""
         # 1. Remove known JSON string verbatim (most reliable)
         if known_json and known_json in text:
             text = text.replace(known_json, "")
-        # 2. Remove fenced ```json ... ``` blocks
-        text = re.sub(r'```json[\s\S]*?```', '', text, flags=re.IGNORECASE)
-        # 3. Remove bare JSON objects — only strip a block if it is CLOSED and
-        #    looks like JSON (has key: value syntax). An unclosed { is kept.
-        result, i = [], 0
-        while i < len(text):
-            if text[i] == '{':
+        # 2. Remove ALL fenced code blocks that contain JSON key syntax
+        text = re.sub(r'```[a-z]*\n[\s\S]*?```', '', text, flags=re.IGNORECASE)
+        # 3. Remove bare JSON objects {…} and arrays […] via bracket-counting.
+        #    Strips both { and [ started blocks that contain "key": patterns.
+        result, i, n = [], 0, len(text)
+        while i < n:
+            ch = text[i]
+            if ch in ('{', '['):
+                open_c, close_c = ch, ('}' if ch == '{' else ']')
                 depth, j, in_str, closed = 0, i, False, False
-                while j < len(text):
-                    ch = text[j]
-                    if ch == '"' and (j == 0 or text[j-1] != '\\'):
+                while j < n:
+                    c = text[j]
+                    if c == '"' and (j == 0 or text[j - 1] != '\\'):
                         in_str = not in_str
                     if not in_str:
-                        if ch == '{':
-                            depth += 1
-                        elif ch == '}':
+                        if c == open_c:   depth += 1
+                        elif c == close_c:
                             depth -= 1
                             if depth == 0:
-                                j += 1
-                                closed = True
-                                break
+                                j += 1; closed = True; break
                     j += 1
-                # Skip if the block is CLOSED and contains JSON key syntax
+                if not closed:
+                    # rfind fallback for unclosed blocks
+                    last_j = text.rfind(close_c, i)
+                    if last_j > i:
+                        j = last_j + 1; closed = True
                 if closed:
                     snippet = text[i:j]
                     if '": ' in snippet or '":"' in snippet:
-                        i = j      # skip JSON block
-                        continue
-                else:
-                    # Unclosed — rfind('}') as last-resort boundary
-                    last_j = text.rfind('}', i)
-                    if last_j > i:
-                        snippet = text[i:last_j + 1]
-                        if '": ' in snippet or '":"' in snippet:
-                            i = last_j + 1
-                            continue
-                # Not JSON — keep the { character
-                result.append(text[i])
-                i += 1
-            else:
-                result.append(text[i])
-                i += 1
-        return ''.join(result).strip()
+                        i = j; continue
+            result.append(text[i])
+            i += 1
+        # 4. Clean up stray comma / bracket lines left after stripping
+        cleaned = re.sub(r'^\s*[,\[\]]\s*$', '', ''.join(result), flags=re.MULTILINE)
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+        return cleaned.strip()
 
     _gen_final = st.session_state.get("generating_final", False)
 

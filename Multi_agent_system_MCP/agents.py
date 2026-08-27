@@ -882,22 +882,23 @@ Remember: output JSON block first, then ---PROSE--- separator, then markdown sum
     if "---PROSE---" in result:
         prose = result.split("---PROSE---", 1)[1].strip()
     else:
-        # LLM skipped the separator — remove the JSON block so only the markdown remains
-        prose = re.sub(r"```json[\s\S]*?```", "", result, flags=re.IGNORECASE).strip()
-        # Also strip a bare { ... } JSON object — use brace-counting so nested {} are handled
-        _p = prose.lstrip()
-        if _p.startswith("{"):
+        # LLM skipped the separator — remove ALL fenced code blocks then bare JSON
+        prose = re.sub(r"```[a-z]*\n[\s\S]*?```", "", result, flags=re.IGNORECASE).strip()
+        # Strip bare { … } and [ … ] JSON blocks via bracket-counting
+        def _bracket_strip(s, open_c, close_c):
+            s = s.lstrip()
+            if not s.startswith(open_c):
+                return s
             _bd, _ei = 0, 0
-            for _ci, _ch in enumerate(_p):
-                if _ch == "{":
-                    _bd += 1
-                elif _ch == "}":
+            for _ci, _ch in enumerate(s):
+                if _ch == open_c:  _bd += 1
+                elif _ch == close_c:
                     _bd -= 1
                     if _bd == 0:
-                        _ei = _ci + 1
-                        break
-            if _ei > 0:
-                prose = _p[_ei:].strip()
+                        _ei = _ci + 1; break
+            return s[_ei:].strip() if _ei > 0 else s
+        prose = _bracket_strip(prose, "{", "}")
+        prose = _bracket_strip(prose, "[", "]")
 
     # Strip any leaked instruction text before the first real content line
     # (LLM sometimes echoes back instruction phrases before the actual ## Day 1 heading)
