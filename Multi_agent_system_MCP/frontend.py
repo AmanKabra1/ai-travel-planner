@@ -552,10 +552,12 @@ def _clean_tab(text: str, max_chars: int = 10000) -> str:
     if not text:
         return text
     import re as _re_ct
+    # Normalise line endings so regexes work regardless of CRLF vs LF
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
     # ── Strip all JSON before showing to the user ─────────────────────────────
-    # Fenced blocks: closed first, then unclosed/truncated
-    text = _re_ct.sub(r'```[a-z]*[ \t]*\n[\s\S]*?```', '', text, flags=_re_ct.IGNORECASE)
-    text = _re_ct.sub(r'```[a-z]*[ \t]*\n[\s\S]*',     '', text, flags=_re_ct.IGNORECASE)
+    # Fenced blocks (any lang tag, any backtick count ≥3): closed first, then unclosed/truncated
+    text = _re_ct.sub(r'`{3,}[^\n]*\n[\s\S]*?`{3,}', '', text, flags=_re_ct.IGNORECASE)
+    text = _re_ct.sub(r'`{3,}[^\n]*\n[\s\S]*',        '', text, flags=_re_ct.IGNORECASE)
     # Bracket-counting: strip bare {…} and […] blocks that look like JSON
     _out, _ci, _cn = [], 0, len(text)
     while _ci < _cn:
@@ -1200,9 +1202,10 @@ def _build_pdf_bytes(state: dict) -> bytes:
         _MAX_ROWS   = 20
         text = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r"<think>.*",          "", text,    flags=re.DOTALL | re.IGNORECASE)
-        # Strip fenced blocks (closed then unclosed) and bare JSON lines
-        text = re.sub(r'```[a-z]*[ \t]*\n[\s\S]*?```', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'```[a-z]*[ \t]*\n[\s\S]*',     '', text, flags=re.IGNORECASE)
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        # Strip fenced blocks (any lang, any backtick count ≥3, CRLF-safe)
+        text = re.sub(r'`{3,}[^\n]*\n[\s\S]*?`{3,}', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'`{3,}[^\n]*\n[\s\S]*',        '', text, flags=re.IGNORECASE)
         _jln = re.compile(
             r'^\s*(?:`+[a-z]*`*|json|"[^"]*"\s*:.*'
             r'|"[^"]*"\s*,?\s*$|[{\}\[\]]\s*,?\s*$'
@@ -1402,10 +1405,11 @@ def _build_pdf_bytes(state: dict) -> bytes:
                     _draw_day_table(pdf, day, color)
             else:
                 # JSON unavailable — strip JSON from prose before rendering
-                # Step 1: fenced blocks (closed then unclosed/truncated)
-                _clean_content = re.sub(r'```[a-z]*[ \t]*\n[\s\S]*?```', '',
-                                        content, flags=re.IGNORECASE)
-                _clean_content = re.sub(r'```[a-z]*[ \t]*\n[\s\S]*', '',
+                _cc_norm = content.replace('\r\n', '\n').replace('\r', '\n')
+                # Step 1: fenced blocks (any lang, any backtick count ≥3, CRLF-safe)
+                _clean_content = re.sub(r'`{3,}[^\n]*\n[\s\S]*?`{3,}', '',
+                                        _cc_norm, flags=re.IGNORECASE)
+                _clean_content = re.sub(r'`{3,}[^\n]*\n[\s\S]*', '',
                                         _clean_content, flags=re.IGNORECASE)
                 # Step 2: bare {…} and […] blocks via bracket-counting
                 # Unclosed blocks → skip to end of string (truncated JSON)
@@ -2255,12 +2259,14 @@ border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,.06);">
         """Remove all JSON blocks and lines from prose text."""
         if not text:
             return ""
+        # Normalise line endings (Gemini API may return CRLF on Windows)
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
         # 1. Remove known JSON string verbatim
         if known_json and known_json in text:
             text = text.replace(known_json, "")
-        # 2. Remove fenced code blocks — try closed first, then unclosed (truncated)
-        text = re.sub(r'```[a-z]*[ \t]*\n[\s\S]*?```', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'```[a-z]*[ \t]*\n[\s\S]*',     '', text, flags=re.IGNORECASE)
+        # 2. Remove fenced code blocks (any lang, any backtick count ≥3, CRLF-safe)
+        text = re.sub(r'`{3,}[^\n]*\n[\s\S]*?`{3,}', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'`{3,}[^\n]*\n[\s\S]*',        '', text, flags=re.IGNORECASE)
         # 3. Bracket-counting: strip {…} and […] JSON blocks
         #    If a block is UNCLOSED (truncated JSON), skip to END OF TEXT
         result, i, n = [], 0, len(text)
@@ -2293,6 +2299,12 @@ border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,.06);">
         kept = [ln for ln in text.split('\n') if not _JSON_LINE_RE.match(ln)]
         # 5. Clean up stray separator chars and extra blank lines
         cleaned = re.sub(r'^\s*[,\[\]\{\}]\s*$', '', '\n'.join(kept), flags=re.MULTILINE)
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+        cleaned = cleaned.strip()
+        # 6. Nuclear final sweep — catch any surviving backtick fences (CRLF-safe)
+        cleaned = re.sub(r'`{3,}[^\n]*\n[\s\S]*?`{3,}', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'`{3,}[^\n]*\n[\s\S]*',        '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'^`{3,}[^\n]*$', '', cleaned, flags=re.MULTILINE)
         cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
         return cleaned.strip()
 

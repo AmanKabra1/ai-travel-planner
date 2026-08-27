@@ -879,10 +879,13 @@ Remember: output JSON block first, then ---PROSE--- separator, then markdown sum
     # Extract the prose section (after ---PROSE--- if present, else strip JSON from full text)
     if "---PROSE---" in result:
         prose = result.split("---PROSE---", 1)[1].strip()
+        # Strip any embedded code blocks the LLM included in the prose section
+        prose = re.sub(r"`{3,}[^\n]*\n[\s\S]*?`{3,}", "", prose, flags=re.IGNORECASE)
+        prose = re.sub(r"`{3,}[^\n]*\n[\s\S]*",        "", prose, flags=re.IGNORECASE)
     else:
         # LLM skipped the separator — strip ALL fenced blocks (closed + unclosed)
-        prose = re.sub(r"```[a-z]*[ \t]*\n[\s\S]*?```", "", result, flags=re.IGNORECASE)
-        prose = re.sub(r"```[a-z]*[ \t]*\n[\s\S]*",     "", prose,  flags=re.IGNORECASE)
+        prose = re.sub(r"`{3,}[^\n]*\n[\s\S]*?`{3,}", "", result, flags=re.IGNORECASE)
+        prose = re.sub(r"`{3,}[^\n]*\n[\s\S]*",        "", prose,  flags=re.IGNORECASE)
         prose = prose.strip()
         # Strip bare { … } and [ … ] JSON blocks via bracket-counting
         # If block is unclosed (truncated JSON), drop everything from that point
