@@ -1310,7 +1310,10 @@ def _build_pdf_bytes(state: dict) -> bytes:
         try:
             _itin_data = _json.loads(_itin_json_str)
         except Exception:
-            _itin_data = {}
+            try:
+                _itin_data = _json.loads(re.sub(r',(\s*[}\]])', r'\1', _itin_json_str))
+            except Exception:
+                _itin_data = {}
 
     first_section = True
     for title, content in sections:
@@ -1330,6 +1333,9 @@ def _build_pdf_bytes(state: dict) -> bytes:
 
         # For the itinerary section: always use structured day tables from JSON
         if title == "Complete Itinerary":
+            # Filter null/empty day entries (LLM sometimes emits [null, null, {…}])
+            if _itin_data.get("days"):
+                _itin_data["days"] = [d for d in _itin_data["days"] if d and isinstance(d, dict)]
             if _itin_data.get("days"):
                 ts = _itin_data.get("trip_summary", {})
                 badge = "AI-Generated — verify bookings before travel"
@@ -2188,13 +2194,21 @@ border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,.06);">
                                 closed = True
                                 break
                     j += 1
-                # Only skip if the block is CLOSED and contains JSON key syntax
+                # Skip if the block is CLOSED and contains JSON key syntax
                 if closed:
                     snippet = text[i:j]
                     if '": ' in snippet or '":"' in snippet:
                         i = j      # skip JSON block
                         continue
-                # Not JSON or unclosed — keep the { character
+                else:
+                    # Unclosed — rfind('}') as last-resort boundary
+                    last_j = text.rfind('}', i)
+                    if last_j > i:
+                        snippet = text[i:last_j + 1]
+                        if '": ' in snippet or '":"' in snippet:
+                            i = last_j + 1
+                            continue
+                # Not JSON — keep the { character
                 result.append(text[i])
                 i += 1
             else:
@@ -2348,15 +2362,24 @@ margin:1.5rem 0;border:1px solid rgba(16,185,129,0.35);">
                 try:
                     _itin_jdata = json.loads(_itin_jstr)
                 except Exception:
-                    pass
+                    try:
+                        _itin_jdata = json.loads(re.sub(r',(\s*[}\]])', r'\1', _itin_jstr))
+                    except Exception:
+                        pass
 
             _resp_text = _strip_json_from_prose(
                 _final.get("final_response") or "", _itin_jstr
             )
 
             # ── Render: structured HTML tables (preferred) ───────────────────
+            # Filter out null/empty day entries before rendering
             if _itin_jdata.get("days"):
-                st.markdown(_render_itin_html(_itin_jdata), unsafe_allow_html=True)
+                _itin_jdata["days"] = [d for d in _itin_jdata["days"] if d and isinstance(d, dict)]
+            if _itin_jdata.get("days"):
+                try:
+                    st.markdown(_render_itin_html(_itin_jdata), unsafe_allow_html=True)
+                except Exception:
+                    pass  # fall through to prose fallback below
                 # Show non-day prose sections (e.g. "What to Say & Do")
                 _extra, _in_extra = [], False
                 for _ln in _resp_text.split("\n"):
@@ -2414,9 +2437,17 @@ margin:1.5rem 0;border:1px solid rgba(16,185,129,0.35);">
                 try:
                     _itin_j2 = json.loads(_itin_j2_str)
                 except Exception:
-                    pass
+                    try:
+                        _itin_j2 = json.loads(re.sub(r',(\s*[}\]])', r'\1', _itin_j2_str))
+                    except Exception:
+                        pass
             if _itin_j2.get("days"):
-                st.markdown(_render_itin_html(_itin_j2), unsafe_allow_html=True)
+                _itin_j2["days"] = [d for d in _itin_j2["days"] if d and isinstance(d, dict)]
+            if _itin_j2.get("days"):
+                try:
+                    st.markdown(_render_itin_html(_itin_j2), unsafe_allow_html=True)
+                except Exception:
+                    pass
             else:
                 _raw_itin = _strip_json_from_prose(_final["itinerary"], _itin_j2_str)
                 if _raw_itin:

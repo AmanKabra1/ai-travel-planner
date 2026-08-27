@@ -857,18 +857,26 @@ Remember: output JSON block first, then ---PROSE--- separator, then markdown sum
 
     # Extract the JSON block
     itinerary_json = ""
+    _candidate = ""
     try:
         m = re.search(r"```json\s*([\s\S]*?)\s*```", result, re.IGNORECASE)
         if m:
-            candidate = m.group(1).strip()
+            _candidate = m.group(1).strip()
         else:
             start = result.index("{")
             end   = result.rindex("}") + 1
-            candidate = result[start:end]
-        json.loads(candidate)          # validate — raises if invalid
-        itinerary_json = candidate
+            _candidate = result[start:end]
+        # Fix trailing commas — common LLM error: "key": , or [,,,{...}]
+        _fixed = re.sub(r',(\s*[}\]])', r'\1', _candidate)
+        json.loads(_fixed)          # validate — raises if still invalid
+        itinerary_json = _fixed
     except (ValueError, json.JSONDecodeError):
-        logger.warning("Itinerary JSON extraction failed; prose-only mode")
+        # Store raw candidate so frontend can strip it verbatim / do best-effort parse
+        itinerary_json = _candidate
+        if _candidate:
+            logger.warning("Itinerary JSON invalid; stored raw for display")
+        else:
+            logger.warning("Itinerary JSON extraction failed; prose-only mode")
 
     # Extract the prose section (after ---PROSE--- if present, else strip JSON from full text)
     if "---PROSE---" in result:
