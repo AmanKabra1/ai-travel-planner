@@ -2414,7 +2414,8 @@ margin:1.5rem 0;border:1px solid rgba(16,185,129,0.35);">
     # ── Itinerary tab — all plan states (approval / itinerary) ──────────────────
     with tab_itin:
         _final = st.session_state.get("latest_result") or {}
-        if _final.get("final_response"):
+        # Enter block if any itinerary content exists (prose or JSON)
+        if _final.get("final_response") or _final.get("itinerary") or _final.get("itinerary_json"):
             _dest_lbl = (_final.get("trip_constraints") or {}).get("destination", "your destination")
 
             # Non-editable choices summary
@@ -2458,7 +2459,7 @@ margin:1.5rem 0;border:1px solid rgba(16,185,129,0.35);">
                         pass
 
             _resp_text = _strip_json_from_prose(
-                _final.get("final_response") or "", _itin_jstr
+                _final.get("final_response") or _final.get("itinerary") or "", _itin_jstr
             )
 
             # ── Render: structured HTML tables (preferred) ───────────────────
