@@ -55,7 +55,7 @@ def _extract_content(result) -> str:
     return str(raw).strip()
 
 
-def _llm_text(system: str, prompt: str) -> str:
+def _llm_text(system: str, prompt: str, max_tokens: int = 8192) -> str:
     """Call the best available LLM: Gemini primary, Groq retry-loop fallback.
 
     Both providers pass through _extract_content() so markdown structure
@@ -67,7 +67,7 @@ def _llm_text(system: str, prompt: str) -> str:
     msgs = [SystemMessage(content=system), HumanMessage(content=prompt)]
 
     # ── Primary: Google Gemini Flash (no TPM limit, 1M context) ──────────────
-    gemini = get_gemini_llm()
+    gemini = get_gemini_llm(max_output_tokens=max_tokens)
     if gemini is not None:
         try:
             text = _extract_content(gemini.invoke(msgs))
@@ -868,6 +868,7 @@ USER CHOICES (apply strictly):
 
 Remember: output JSON block first, then ---PROSE--- separator, then markdown summary.
 """,
+        max_tokens=8192,
     )
 
     # Extract the JSON block
