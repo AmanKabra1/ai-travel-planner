@@ -1356,15 +1356,44 @@ def _build_pdf_bytes(state: dict) -> bytes:
             pdf.cell(178, 5, _clean(f"Day Budget: {cost} per person"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(2)
 
-    # Parse itinerary_json for structured day tables
+    # Parse itinerary_json for structured day tables (3-strategy repair)
     _itin_json_str = state.get("itinerary_json", "") or ""
     _itin_data = {}
     if _itin_json_str.strip():
+        # Strategy 1: exact parse
         try:
             _itin_data = _json.loads(_itin_json_str)
         except Exception:
+            pass
+        # Strategy 2: fix trailing commas + missing values
+        if not _itin_data:
             try:
-                _itin_data = _json.loads(re.sub(r',(\s*[}\]])', r'\1', _itin_json_str))
+                _s2 = re.sub(r',(\s*[}\]])', r'\1', _itin_json_str)
+                _s2 = re.sub(r':\s*,', ': null,', _s2)
+                _s2 = re.sub(r':\s*([}\]])', r': null\1', _s2)
+                _itin_data = _json.loads(_s2)
+            except Exception:
+                pass
+        # Strategy 3: close unclosed brackets (truncated JSON)
+        if not _itin_data:
+            try:
+                _s3 = re.sub(r',(\s*[}\]])', r'\1', _itin_json_str).rstrip().rstrip(',')
+                _stk, _ins3, _si3 = [], False, 0
+                _pairs = {'{': '}', '[': ']'}
+                while _si3 < len(_s3):
+                    _ch3 = _s3[_si3]
+                    if _ch3 == '"' and (_si3 == 0 or _s3[_si3 - 1] != '\\'):
+                        _ins3 = not _ins3
+                    if not _ins3:
+                        if _ch3 in _pairs:
+                            _stk.append(_pairs[_ch3])
+                        elif _ch3 in ('}', ']') and _stk and _stk[-1] == _ch3:
+                            _stk.pop()
+                    _si3 += 1
+                if _ins3:
+                    _s3 += '"'
+                _s3 += ''.join(reversed(_stk))
+                _itin_data = _json.loads(_s3)
             except Exception:
                 _itin_data = {}
 
