@@ -1009,7 +1009,7 @@ def _build_pdf_bytes(state: dict) -> bytes:
     if info_parts:
         pdf.set_font("Helvetica", "", 12)
         pdf.set_text_color(202, 138, 4)
-        pdf.cell(0, 7, "  |  ".join(info_parts), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 7, _clean("  |  ".join(info_parts)), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     pdf.ln(20)
 
@@ -1043,7 +1043,7 @@ def _build_pdf_bytes(state: dict) -> bytes:
             pdf.cell(28, 7, f"{lbl}:", new_x=XPos.RIGHT, new_y=YPos.TOP)
             pdf.set_font("Helvetica", "", 9)
             pdf.set_text_color(220, 230, 240)
-            pdf.cell(0, 7, val[:70], new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.cell(0, 7, _clean(val)[:70], new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.set_x(34)
         pdf.ln(6)
 
@@ -1285,7 +1285,7 @@ def _build_pdf_bytes(state: dict) -> bytes:
         label = f"Day {day_num}"
         if day_date:
             label += f"  |  {day_date}"
-        pdf.cell(172, 6, label, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(172, 6, _clean(label), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_x(pdf.l_margin)
         pdf.ln(1)
 
@@ -1327,13 +1327,13 @@ def _build_pdf_bytes(state: dict) -> bytes:
                 plc_txt = plc[:38] if plc else "_______________"
                 pdf.cell(COL[1], row_h, plc_txt, border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
                 # Duration
-                dur_txt = (dur + "h") if dur and dur != "—" and "h" not in dur else (dur or "—")
+                dur_txt = (dur + "h") if dur and dur not in ("-", "N/A") and "h" not in dur else (dur or "-")
                 pdf.cell(COL[2], row_h, dur_txt[:10], border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
                 # Cost
-                fee_txt = fee if fee else "—"
+                fee_txt = fee if fee else "-"
                 pdf.cell(COL[3], row_h, fee_txt[:14], border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
                 # Notes
-                pdf.cell(COL[4], row_h, nt[:28] if nt else "—", border=1, fill=True,
+                pdf.cell(COL[4], row_h, nt[:28] if nt else "-", border=1, fill=True,
                          new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.ln(1)
 
@@ -1353,7 +1353,7 @@ def _build_pdf_bytes(state: dict) -> bytes:
             pdf.set_font("Helvetica", "B", 8.5)
             pdf.set_text_color(r, g, b)
             pdf.set_x(16)
-            pdf.cell(178, 5, f"Day Budget: {cost} per person", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.cell(178, 5, _clean(f"Day Budget: {cost} per person"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(2)
 
     # Parse itinerary_json for structured day tables
@@ -1391,9 +1391,10 @@ def _build_pdf_bytes(state: dict) -> bytes:
                 _itin_data["days"] = [d for d in _itin_data["days"] if d and isinstance(d, dict)]
             if _itin_data.get("days"):
                 ts = _itin_data.get("trip_summary", {})
-                badge = "AI-Generated — verify bookings before travel"
+                badge = "AI-Generated - verify bookings before travel"
                 if ts.get("total_budget_estimate"):
                     badge += f"   |   Total: {_clean(str(ts['total_budget_estimate']))}"
+                badge = _clean(badge)
                 pdf.set_font("Helvetica", "I", 7.5)
                 pdf.set_text_color(202, 138, 4)
                 pdf.set_x(pdf.l_margin)
