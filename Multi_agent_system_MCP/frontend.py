@@ -2450,13 +2450,54 @@ margin:1.5rem 0;border:1px solid rgba(16,185,129,0.35);">
             _itin_jstr  = _final.get("itinerary_json", "") or ""
             _itin_jdata = {}
             if _itin_jstr.strip():
+                # Strategy 1: exact parse
                 try:
                     _itin_jdata = json.loads(_itin_jstr)
                 except Exception:
+                    pass
+                # Strategy 2: fix trailing commas + missing values (key: ,)
+                if not _itin_jdata:
                     try:
-                        _itin_jdata = json.loads(re.sub(r',(\s*[}\]])', r'\1', _itin_jstr))
+                        _s2 = re.sub(r',(\s*[}\]])', r'\1', _itin_jstr)
+                        _s2 = re.sub(r':\s*,', ': null,', _s2)
+                        _s2 = re.sub(r':\s*([}\]])', r': null\1', _s2)
+                        _itin_jdata = json.loads(_s2)
                     except Exception:
                         pass
+                # Strategy 3: close unclosed brackets (handles truncated JSON)
+                if not _itin_jdata:
+                    _s3 = re.sub(r',(\s*[}\]])', r'\1', _itin_jstr).rstrip().rstrip(',')
+                    _stk, _ins, _si = [], False, 0
+                    while _si < len(_s3):
+                        _sc = _s3[_si]
+                        if _sc == '\\' and _ins:
+                            _si += 2; continue
+                        if _sc == '"':
+                            _ins = not _ins
+                        elif not _ins:
+                            if _sc in '{[': _stk.append('}' if _sc == '{' else ']')
+                            elif _sc in '}]' and _stk: _stk.pop()
+                        _si += 1
+                    if _stk:
+                        if _ins:  # truncated inside a string — trim to last comma/brace
+                            _lc = max(_s3.rfind(','), _s3.rfind('{'), _s3.rfind('['))
+                            if _lc > 0: _s3 = _s3[:_lc].rstrip().rstrip(',')
+                            # recompute stack after trim
+                            _stk2, _ins2, _si2 = [], False, 0
+                            while _si2 < len(_s3):
+                                _sc2 = _s3[_si2]
+                                if _sc2 == '\\' and _ins2: _si2 += 2; continue
+                                if _sc2 == '"': _ins2 = not _ins2
+                                elif not _ins2:
+                                    if _sc2 in '{[': _stk2.append('}' if _sc2 == '{' else ']')
+                                    elif _sc2 in '}]' and _stk2: _stk2.pop()
+                                _si2 += 1
+                            _stk = _stk2
+                        _s3 += ''.join(reversed(_stk))
+                        try:
+                            _itin_jdata = json.loads(_s3)
+                        except Exception:
+                            pass
 
             _resp_text = _strip_json_from_prose(
                 _final.get("final_response") or _final.get("itinerary") or "", _itin_jstr
@@ -2487,7 +2528,25 @@ margin:1.5rem 0;border:1px solid rgba(16,185,129,0.35);">
                 st.markdown(_resp_text)
 
             else:
-                st.info("Itinerary content is being processed. If this persists, regenerate the plan.")
+                # Last resort: extract readable trip info from the raw JSON string
+                _raw_src = _itin_jstr or ""
+                _rescue_lines = []
+                if _raw_src:
+                    for _rln in _raw_src.split('\n'):
+                        _rln = _rln.strip()
+                        _m = re.search(
+                            r'"(place|time|theme|date|day|notes|duration_hrs|cost|hotel|meals?|'
+                            r'breakfast|lunch|dinner|estimated_day_cost|trip_summary|budget|'
+                            r'total_days|departure|arrival)"\s*:\s*"([^"]{1,200})"',
+                            _rln, re.I
+                        )
+                        if _m:
+                            _rescue_lines.append(f"**{_m.group(1).replace('_',' ').title()}**: {_m.group(2)}")
+                if _rescue_lines:
+                    st.markdown("### Your Itinerary *(partial — please regenerate for full tables)*")
+                    st.markdown('\n\n'.join(_rescue_lines))
+                else:
+                    st.warning("⚠️ The AI returned an incomplete response. Please click **New Trip Plan** and try again — this usually resolves on the second attempt.")
             st.divider()
 
             # Cache PDF bytes keyed by thread_id so each new run regenerates
