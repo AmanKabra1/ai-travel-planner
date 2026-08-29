@@ -63,6 +63,7 @@ st.set_page_config(
     page_icon="🌍",
     layout="wide",
     initial_sidebar_state="expanded",
+    menu_items={},   # removes the ☰ hamburger menu items (About / Report a bug)
 )
 
 # ── Timezone auto-detect: inject JS once to set ?tz= query param ──────────────
@@ -95,10 +96,22 @@ st.markdown("""
 [data-testid="stBottom"]             { background: #060d1f; }
 .stApp { background: #060d1f; }
 
-/* ── Hide Streamlit Cloud "Manage app" button (bottom-right) ── */
+/* ── Hide Streamlit "Manage app" button + footer + main menu ── */
 a[href*="manage=true"],
+a[href*="manage"],
 [class*="viewerBadge"],
-[data-testid="manage-app-button"] { display: none !important; }
+[class*="ViewerBadge"],
+[class*="viewer-badge"],
+[data-testid="manage-app-button"],
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"],
+.stDeployButton,
+#MainMenu,
+footer,
+footer + div,
+button[title="Manage app"],
+button[aria-label="Manage app"] { display: none !important; }
 
 /* ── Hero ── */
 .hero-wrap {
