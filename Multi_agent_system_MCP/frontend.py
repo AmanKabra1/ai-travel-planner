@@ -1304,7 +1304,7 @@ def _build_pdf_bytes(state: dict) -> bytes:
 
         if acts:
             # Table header
-            COL = [22, 82, 18, 26, 30]  # Time | Activity | Duration | Cost | Notes
+            COL = [22, 68, 18, 26, 44]  # Time | Activity | Duration | Cost | Notes
             HDR = ["Time", "Activity", "Duration", "Cost", "Notes"]
             pdf.set_fill_color(min(255, r+180), min(255, g+180), min(255, b+180))
             pdf.set_font("Helvetica", "B", 8)
@@ -1337,16 +1337,16 @@ def _build_pdf_bytes(state: dict) -> bytes:
                 pdf.set_font("Helvetica", "", 8)
                 pdf.set_text_color(30, 41, 59)
                 # Activity
-                plc_txt = plc[:38] if plc else "_______________"
+                plc_txt = plc[:32] if plc else "_______________"
                 pdf.cell(COL[1], row_h, plc_txt, border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
                 # Duration
                 dur_txt = (dur + "h") if dur and dur not in ("-", "N/A") and "h" not in dur else (dur or "-")
-                pdf.cell(COL[2], row_h, dur_txt[:10], border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
+                pdf.cell(COL[2], row_h, dur_txt[:8], border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
                 # Cost
                 fee_txt = fee if fee else "-"
-                pdf.cell(COL[3], row_h, fee_txt[:14], border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
+                pdf.cell(COL[3], row_h, fee_txt[:12], border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
                 # Notes
-                pdf.cell(COL[4], row_h, nt[:28] if nt else "-", border=1, fill=True,
+                pdf.cell(COL[4], row_h, nt[:21] if nt else "-", border=1, fill=True,
                          new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.ln(1)
 
