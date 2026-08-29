@@ -649,8 +649,10 @@ def budget_agent(state: TravelState):
             results = _parallel_tavily(
                 f"{destination} travel cost 2026 hotel price food budget per day per person",
                 f"{destination} entry fees tourist places 2026 ticket prices activities cost",
+                f"{destination} local transport auto rickshaw taxi bus fare 2026",
+                f"{destination} street food restaurant cost cheap eats budget 2026",
             )
-            price_data = "\n---\n".join(r for r in results if r)[:2500]
+            price_data = "\n---\n".join(r for r in results if r)[:4000]
         except Exception as exc:
             logger.warning("Budget price search failed: %s", exc)
 
@@ -667,10 +669,7 @@ Trip details:
 - Duration: {constraints.get('duration', 'see dates')} days
 - Budget preference: {constraints.get('budget', 'not specified')}
 
-Live 2026 price data for {destination}:
-{price_data}
-
-Live 2026 price data (use these fares and hotel rates for all cost estimates):
+Live 2026 price data for {destination} (hotels, food, transport, entry fees):
 {price_data}
 
 Produce a budget breakdown in this exact Markdown format:
@@ -693,15 +692,33 @@ Produce a budget breakdown in this exact Markdown format:
 |--|--------|-----------|---------|
 | **Grand Total** | **Rs. X** | **Rs. X** | **Rs. X** |
 
+### 🍽️ Food Cost Guide
+| Meal Type | Estimated Cost per Person |
+|-----------|--------------------------|
+| Street food / snacks | Rs. X |
+| Local restaurant (thali / meal) | Rs. X |
+| Mid-range restaurant | Rs. X |
+| Branded café / fast food | Rs. X |
+
+### 🚌 Local Transport Guide
+| Mode | Typical Fare |
+|------|-------------|
+| Auto rickshaw (3 km) | Rs. X |
+| Local bus | Rs. X |
+| Taxi / cab app | Rs. X/km |
+| Cycle rickshaw | Rs. X |
+
 ### 💡 Money-Saving Tips
 1. [specific tip for this destination]
-2. ...
+2. [another specific tip]
+3. [third specific tip]
 
 ### ⚠️ Budget Risks
 - [what might cost more than expected]
+- [seasonal price surge risk]
 
 ### ✅ Feasibility
-One paragraph on whether the user's stated budget is realistic.
+One paragraph on whether the user's stated budget is realistic, with a specific recommendation.
 
 Use real fares from the search data where possible. Label estimates clearly.
 """,
@@ -879,9 +896,9 @@ Remember: output JSON block first, then ---PROSE--- separator, then markdown sum
     # Extract the prose section (after ---PROSE--- if present, else strip JSON from full text)
     if "---PROSE---" in result:
         prose = result.split("---PROSE---", 1)[1].strip()
-        # Strip any embedded code blocks the LLM included in the prose section
-        prose = re.sub(r"`{3,}[^\n]*\n[\s\S]*?`{3,}", "", prose, flags=re.IGNORECASE)
-        prose = re.sub(r"`{3,}[^\n]*\n[\s\S]*",        "", prose, flags=re.IGNORECASE)
+        # Only strip ```json blocks embedded in prose (not ```markdown or plain ```)
+        prose = re.sub(r"`{3,}json[ \t]*\n[\s\S]*?`{3,}", "", prose, flags=re.IGNORECASE)
+        prose = re.sub(r"`{3,}json[ \t]*\n[\s\S]*",        "", prose, flags=re.IGNORECASE)
     else:
         # LLM skipped the separator — strip ALL fenced blocks (closed + unclosed)
         prose = re.sub(r"`{3,}[^\n]*\n[\s\S]*?`{3,}", "", result, flags=re.IGNORECASE)

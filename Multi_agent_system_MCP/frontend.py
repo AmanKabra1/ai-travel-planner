@@ -2264,9 +2264,13 @@ border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,.06);">
         # 1. Remove known JSON string verbatim
         if known_json and known_json in text:
             text = text.replace(known_json, "")
-        # 2. Remove fenced code blocks (any lang, any backtick count ≥3, CRLF-safe)
-        text = re.sub(r'`{3,}[^\n]*\n[\s\S]*?`{3,}', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'`{3,}[^\n]*\n[\s\S]*',        '', text, flags=re.IGNORECASE)
+        # 2. Remove fenced code blocks that are clearly JSON:
+        #    a) ```json ... ``` (any backtick count ≥3, closed then unclosed/truncated)
+        text = re.sub(r'`{3,}json[ \t]*\n[\s\S]*?`{3,}', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'`{3,}json[ \t]*\n[\s\S]*',        '', text, flags=re.IGNORECASE)
+        #    b) any code block whose first content line starts with { or [
+        text = re.sub(r'`{3,}[^\n]*\n[ \t]*[\{\[][\s\S]*?`{3,}', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'`{3,}[^\n]*\n[ \t]*[\{\[][\s\S]*',        '', text, flags=re.IGNORECASE)
         # 3. Bracket-counting: strip {…} and […] JSON blocks
         #    If a block is UNCLOSED (truncated JSON), skip to END OF TEXT
         result, i, n = [], 0, len(text)
@@ -2299,12 +2303,6 @@ border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,.06);">
         kept = [ln for ln in text.split('\n') if not _JSON_LINE_RE.match(ln)]
         # 5. Clean up stray separator chars and extra blank lines
         cleaned = re.sub(r'^\s*[,\[\]\{\}]\s*$', '', '\n'.join(kept), flags=re.MULTILINE)
-        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
-        cleaned = cleaned.strip()
-        # 6. Nuclear final sweep — catch any surviving backtick fences (CRLF-safe)
-        cleaned = re.sub(r'`{3,}[^\n]*\n[\s\S]*?`{3,}', '', cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r'`{3,}[^\n]*\n[\s\S]*',        '', cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r'^`{3,}[^\n]*$', '', cleaned, flags=re.MULTILINE)
         cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
         return cleaned.strip()
 
