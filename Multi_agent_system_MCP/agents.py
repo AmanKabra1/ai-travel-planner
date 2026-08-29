@@ -311,7 +311,7 @@ def hotel_agent(state: TravelState):
         search_text = "Live search unavailable."
 
     result = _llm_text(
-        "You are a hotel specialist. Use REAL names and prices from the search data. Write each area ONCE.",
+        "You are a hotel specialist. Use real hotel names and prices — from search data if available, otherwise from your knowledge. Write each area ONCE.",
         f"""Hotel recommendations for: {destination}
 User request: {state['user_query']}
 
@@ -566,7 +566,7 @@ def nearby_agent(state: TravelState):
         }
 
     result = _llm_text(
-        "You are a local expert. Use REAL names from the data. Mix tables with brief descriptions where helpful.",
+        "You are a local expert. Use real place names — from the data if available, otherwise from your own knowledge of the destination. Always fill every table with actual content.",
         f"""Local guide for {destination}, {region}, {country}.
 
 MAP DATA (POIs): {bucket_txt[:600]}
@@ -576,6 +576,8 @@ MARKETS: {t_markets[:700]}
 EXPERIENCES: {t_exp[:600]}
 HIDDEN GEMS: {t_gems[:500]}
 LOCAL TRANSPORT: {t_tips[:500]}
+
+IMPORTANT: If the above sections are empty or show errors, use your own knowledge of {destination} to fill every table below with real, accurate information. Never refuse or leave tables empty.
 
 ## 📍 Nearby Attractions
 1–2 sentences about what makes {destination} special for visitors.
@@ -622,8 +624,6 @@ Brief intro (1 sentence) on the food culture of {destination}.
 
 ## 💡 Insider Tips
 2–3 practical tips a first-time visitor to {destination} must know.
-
-Use REAL place names from MAP DATA and WEB RESEARCH.
 """,
     )
 
