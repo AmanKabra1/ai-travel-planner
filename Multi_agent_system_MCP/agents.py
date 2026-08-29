@@ -788,34 +788,31 @@ RULES:
 
 OUTPUT — exactly TWO blocks separated by ---PROSE---:
 
-Block 1: valid JSON fenced as ```json
-{"trip_summary":{"from":"","to":"","start_date":"","end_date":"","members":0,"transport_mode":"","total_budget_estimate":""},"hotels":[{"name":"","type":"budget|best_value|premium","price_per_night":"","rating":"","booking_link":"","notes":""}],"days":[{"day":1,"date":"","activities":[{"time":"","place":"","category":"","duration_hrs":"","entry_fee":"","notes":""}],"meals":{"breakfast":"","lunch":"","dinner":""},"estimated_day_cost":""}],"local_food":[{"dish":"","where":"","price_range":""}],"local_markets":[{"name":"","known_for":"","best_time":""}],"nearby_attractions":[{"name":"","category":"","distance_km":"","entry_fee":"","duration_hrs":"","best_time":""}],"transport":{"to_destination":[{"mode":"","cost_per_person":"","duration":"","booking_link":""}],"local":[{"mode":"","cost_per_day":""}]},"budget_breakdown":{"transport_total":"","hotel_total":"","food_total":"","activities_total":"","local_transport_total":"","buffer_10pct":"","grand_total":"","cost_per_person":""}}
+Block 1: valid JSON fenced as ```json — keep values SHORT (under 60 chars each)
+{"trip_summary":{"from":"","to":"","start_date":"","end_date":"","members":0,"transport_mode":"","total_budget_estimate":""},"days":[{"day":1,"date":"","activities":[{"time":"","place":"","duration_hrs":"","entry_fee":"","notes":""}],"meals":{"breakfast":"","lunch":"","dinner":""},"hotel":"","estimated_day_cost":""}],"budget_breakdown":{"transport_total":"","hotel_total":"","food_total":"","activities_total":"","buffer_10pct":"","grand_total":"","cost_per_person":""}}
+CRITICAL: Include ALL days (every single day from start to end date). Do NOT stop at day 2 if the trip is 3 days.
 
-Block 2 (after ---PROSE---): Markdown itinerary — NO prose paragraphs, NO bullet lists. Tables ONLY.
+Block 2 (after ---PROSE---): Markdown tables ONLY — no prose paragraphs, no bullet lists.
+Generate ALL days without stopping early. For EVERY day:
 
-For EVERY day use this format:
-## 🗓 Day N — [Theme] | [Date]
-| 🕐 Time | ➤ Activity | ⏱ Duration | 💰 Cost | 📝 Notes |
-|---------|-----------|------------|---------|---------|
-| 06:00 AM | ➤ [ORIGIN CITY] — Depart from [Station/Airport name] | — | Rs.0 | Platform/Gate info |
-| 07:00 AM | ➤ Breakfast — [dish] @ [place or _______________] | 45 min | Rs.XX | tip |
-| [arrival time] | ➤ Arrive [DESTINATION] — [Station name] | — | — | Check schedule |
-| [check-in time] | ➤ Hotel check-in — [Hotel name or _______________] | 1h | Rs.XX | per night |
-| [next time] | ➤ [Attraction / activity] | Xh | Rs.XX | [name or _______________] |
-...continue for all time slots...
-(Day 2 onwards: no departure activity — itinerary starts directly at destination attractions)
-**🍽 Meals:** BF: [dish@place] · Lunch: [dish@place] · Dinner: [dish@place]
-**🏨 Stay:** [Hotel or _______________] · Rs.XX/night  **💰 Day Budget:** Rs.XXXX/person
+## Day N — [Theme] | [Date]
+| Time | Activity | Duration | Cost | Notes |
+|------|----------|----------|------|-------|
+| 06:00 AM | [ORIGIN] Depart [Station] | — | Rs.0 | Platform info |
+| [arrival] | Arrive [DESTINATION] Station | — | — | — |
+| [check-in] | Hotel check-in | 1h | Rs.XX | hotel name |
+| [time] | [Attraction] | Xh | Rs.XX | tip |
+Meals: BF:[dish@place] Lunch:[dish@place] Dinner:[dish@place]  Budget: Rs.XXXX/person
 ---
+(Day 2+: skip departure, start directly at destination)
 
-After all days add ## 💬 What to Say & Do, then ## 💰 Total Budget Summary table:
+After all days, one summary table:
 | Item | Per Person | Total |
 |------|-----------|-------|
 | Transport | Rs.XX | Rs.XX |
 | Hotels | Rs.XX | Rs.XX |
 | Food | Rs.XX | Rs.XX |
 | Activities | Rs.XX | Rs.XX |
-| Buffer 10% | Rs.XX | Rs.XX |
 | **GRAND TOTAL** | **Rs.XX** | **Rs.XX** |
 """.strip()
 

@@ -1350,7 +1350,7 @@ def _build_pdf_bytes(state: dict) -> bytes:
                          new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.ln(1)
 
-        # Meals row
+        # Meals + Hotel row
         pdf.set_font("Helvetica", "I", 8.5)
         pdf.set_text_color(71, 85, 105)
         pdf.set_x(16)
@@ -1361,6 +1361,10 @@ def _build_pdf_bytes(state: dict) -> bytes:
                 meal_parts.append(f"{slot}: {v[:35]}")
         if meal_parts:
             pdf.multi_cell(178, 5, "  |  ".join(meal_parts))
+        hotel_name = _clean(str(day_data.get("hotel", "")))
+        if hotel_name:
+            pdf.set_x(16)
+            pdf.multi_cell(178, 5, f"Stay: {hotel_name[:60]}")
         # Day cost
         if cost:
             pdf.set_font("Helvetica", "B", 8.5)
@@ -1412,7 +1416,10 @@ def _build_pdf_bytes(state: dict) -> bytes:
 
     first_section = True
     for title, content in sections:
-        if not content or not content.strip():
+        # For Complete Itinerary: allow rendering even when prose content is empty,
+        # as long as _itin_data["days"] exists for the structured day-table path.
+        _has_itin_days = (title == "Complete Itinerary" and bool(_itin_data.get("days")))
+        if not _has_itin_days and (not content or not content.strip()):
             continue
 
         color = SECTION_COLORS.get(title, (14, 165, 233))
@@ -2257,6 +2264,9 @@ padding:1.1rem 1.5rem;margin-bottom:1.4rem;border-left:4px solid #f59e0b;">
             if meals.get("breakfast"): meal_bits.append(f"🍳 <b>BF:</b> {meals['breakfast']}")
             if meals.get("lunch"):     meal_bits.append(f"🍽 <b>Lunch:</b> {meals['lunch']}")
             if meals.get("dinner"):    meal_bits.append(f"🌙 <b>Dinner:</b> {meals['dinner']}")
+            hotel_nm = day.get("hotel", "")
+            if hotel_nm:
+                meal_bits.append(f"🏨 <b>Stay:</b> {hotel_nm}")
             meals_html = ""
             if meal_bits:
                 meals_html = f"""
